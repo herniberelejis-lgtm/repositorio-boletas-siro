@@ -8,6 +8,10 @@
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- pdf-lib parte el PDF de cupones en una boleta por página. Si no carga,
+     la app sigue funcionando y sólo guarda los links de pago. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="/siro-parse.js"></script>
 <style>
   :root{
     --bg:#F4F7F6; --surface:#FFFFFF; --surface-2:#EEF4F3; --border:#DCE8E6;
@@ -85,6 +89,22 @@
   .hidden{display:none !important;}
   .spinner{display:inline-block;width:12px;height:12px;border:2px solid var(--border);border-top-color:var(--teal);border-radius:50%;animation:spin .7s linear infinite;}
   @keyframes spin{to{transform:rotate(360deg);}}
+
+  .pdf-btn{background:var(--teal);color:#fff;border:none;font-size:11px;font-weight:600;padding:5px 10px;border-radius:5px;cursor:pointer;white-space:nowrap;}
+  .pdf-btn:hover{background:#00c4ae;}
+  .pdf-btn.ghost{background:transparent;border:1px solid var(--border);color:var(--text-dim);}
+  .pdf-btn.ghost:hover{border-color:var(--teal-dim);color:var(--text);background:transparent;}
+  .cell-actions{display:flex;gap:6px;align-items:center;}
+  .no-pdf{color:var(--text-dim);font-size:11px;}
+  .warn-panel{border-color:#E0A020;background:#FFFBF2;}
+  .flag{display:inline-block;font-size:10px;font-weight:600;color:#B26A00;border:1px solid #E0A020;border-radius:100px;padding:2px 7px;margin-left:6px;white-space:nowrap;}
+  .bar{height:4px;background:var(--surface-2);border-radius:100px;overflow:hidden;margin-top:6px;}
+  .bar > i{display:block;height:100%;background:var(--teal);width:0;transition:width .2s;}
+  .log-line{align-items:flex-start;}
+  .log-line .log-detail{display:block;color:var(--text-dim);font-weight:400;margin-top:3px;}
+  .review-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-family:'IBM Plex Mono',monospace;font-size:12px;padding:8px 0;border-bottom:1px solid var(--border);}
+  .review-row input{width:130px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:5px;padding:6px 8px;font-family:'IBM Plex Mono',monospace;font-size:12px;}
+  .review-row .grow{flex:1;min-width:150px;color:var(--text-dim);}
 </style>
 </head>
 <body>
@@ -120,8 +140,8 @@
     <h2>Buscar afiliado(s)</h2>
     <div class="row">
       <div class="field" style="flex:2">
-        <label for="queryBox">N° de afiliado — uno por línea o separados por coma. Podés pegar con o sin ceros a la izquierda.</label>
-        <textarea id="queryBox" placeholder="2586459&#10;280694&#10;..."></textarea>
+        <label for="queryBox">N° de afiliado — uno por línea o separados por coma. Podés pegar con o sin ceros a la izquierda, y también un CPE completo.</label>
+        <textarea id="queryBox" placeholder="3910284&#10;371852&#10;..."></textarea>
       </div>
       <div><button id="searchBtn">Buscar</button></div>
     </div>
@@ -148,12 +168,19 @@
     <div class="panel">
       <div class="step-label">Repositorio</div>
       <h2>Lotes cargados</h2>
-      <p class="desc">Queda guardado del lado del servidor de este artefacto. No hace falta recargar todo de nuevo cada vez.</p>
+      <p class="desc">Queda guardado del lado del servidor. No hace falta recargar todo de nuevo cada vez.</p>
       <div id="repoTableWrap"></div>
       <div class="stats-strip" id="repoStats"></div>
       <div class="footer-actions">
         <button class="danger" id="clearRepoBtn">Vaciar repositorio</button>
       </div>
+    </div>
+
+    <div class="panel hidden" id="reviewPanel">
+      <div class="step-label">Revisión</div>
+      <h2>Boletas sin afiliado</h2>
+      <p class="desc">El afiliado sale del CPE, que es determinístico, así que esto normalmente queda vacío. Si alguna fila aparece acá, cargá el número a mano.</p>
+      <div id="reviewWrap"></div>
     </div>
 
     <div class="panel">
@@ -162,7 +189,7 @@
       <p class="desc">Podés arrastrar varios archivos a la vez. Si un archivo ya estaba cargado (mismo nombre), lo reemplaza.</p>
       <div id="dropzone">
         <p class="main-cta">Arrastrá Excel de SIRO o PDF de cupones (uno o varios), o hacé clic para elegirlos</p>
-        <p>Acepta .xlsx / .xls (Links de Pago) y .pdf (Cupones) — se procesan en tu navegador, no se suben a ningún servidor externo</p>
+        <p>Acepta .xlsx / .xls (Links de Pago) y .pdf (Cupones). Los PDF se parten en una boleta por página y se guardan para poder descargarlas después</p>
       </div>
       <input type="file" id="fileInput" accept=".xlsx,.xls,.pdf" multiple>
       <div id="uploadLog"></div>
@@ -176,63 +203,46 @@
 </div>
 
 <script>
-const INDEX_KEY = 'siro-lotes-index';
-const KNOWN_SUFFIX = '7150800660'; // fallback conocido de la cuenta de este usuario
+'use strict';
 
-const dropzone = document.getElementById('dropzone');
-const fileInput = document.getElementById('fileInput');
-const uploadLog = document.getElementById('uploadLog');
-const statusBadge = document.getElementById('statusBadge');
-const repoTableWrap = document.getElementById('repoTableWrap');
-const repoStats = document.getElementById('repoStats');
-const queryBox = document.getElementById('queryBox');
-const resultsPanel = document.getElementById('resultsPanel');
-const resultsContainer = document.getElementById('resultsContainer');
-const adminPanels = document.getElementById('adminPanels');
-const adminToggle = document.getElementById('adminToggle');
+const S = window.SiroParse;
+
+const dropzone        = document.getElementById('dropzone');
+const fileInput       = document.getElementById('fileInput');
+const uploadLog       = document.getElementById('uploadLog');
+const statusBadge     = document.getElementById('statusBadge');
+const repoTableWrap   = document.getElementById('repoTableWrap');
+const repoStats       = document.getElementById('repoStats');
+const queryBox        = document.getElementById('queryBox');
+const resultsPanel    = document.getElementById('resultsPanel');
+const resultsContainer= document.getElementById('resultsContainer');
+const adminPanels     = document.getElementById('adminPanels');
+const adminToggle     = document.getElementById('adminToggle');
 const adminToggleBack = document.getElementById('adminToggleBack');
-
-adminToggle.addEventListener('click', e => {
-  e.preventDefault();
-  adminPanels.classList.remove('hidden');
-  adminToggle.parentElement.classList.add('hidden');
-  renderRepo();
-});
-adminToggleBack.addEventListener('click', e => {
-  e.preventDefault();
-  adminPanels.classList.add('hidden');
-  adminToggle.parentElement.classList.remove('hidden');
-});
+const reviewPanel     = document.getElementById('reviewPanel');
+const reviewWrap      = document.getElementById('reviewWrap');
+const searchBtn       = document.getElementById('searchBtn');
 
 let lastResults = [];
-
-dropzone.addEventListener('click', () => fileInput.click());
-dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
-dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
-dropzone.addEventListener('drop', e => {
-  e.preventDefault();
-  dropzone.classList.remove('drag');
-  if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
-});
-fileInput.addEventListener('change', e => { if (e.target.files.length) handleFiles(e.target.files); });
 
 function escapeHtml(str){
   return String(str ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-function normalizeAfiliado(v){
-  const digits = String(v ?? '').replace(/\D/g,'');
-  if(!digits) return '';
-  return String(parseInt(digits,10));
-}
 
-// ---- login gate ----
+// ---- login ----------------------------------------------------------
 function getAppPassword(){ return sessionStorage.getItem('siro-app-pw') || ''; }
 function authHeaders(){ return { 'x-app-password': getAppPassword() }; }
 
 async function tryEnter(pw){
   const errEl = document.getElementById('loginError');
   errEl.textContent = '';
-  const r = await fetch('/api/lotes', { headers: { 'x-app-password': pw } });
+  let r;
+  try{
+    r = await fetch('/api/lotes', { headers: { 'x-app-password': pw } });
+  }catch(e){
+    errEl.textContent = 'No se pudo conectar con el servidor.';
+    return;
+  }
   if (r.status === 401){
     errEl.textContent = 'Contraseña incorrecta.';
     return;
@@ -249,252 +259,236 @@ document.getElementById('loginBtn').addEventListener('click', () => {
 document.getElementById('passwordInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') tryEnter(document.getElementById('passwordInput').value);
 });
+if (getAppPassword()) tryEnter(getAppPassword());
 
-// intento automático si ya había una contraseña guardada en esta pestaña
-if (getAppPassword()){
-  tryEnter(getAppPassword());
-}
+adminToggle.addEventListener('click', e => {
+  e.preventDefault();
+  adminPanels.classList.remove('hidden');
+  adminToggle.parentElement.classList.add('hidden');
+  renderRepo();
+});
+adminToggleBack.addEventListener('click', e => {
+  e.preventDefault();
+  adminPanels.classList.add('hidden');
+  adminToggle.parentElement.classList.remove('hidden');
+});
 
-// ---- backend API helpers ----
-async function apiGetIndex(){
-  const r = await fetch('/api/lotes', { headers: authHeaders() });
-  if (!r.ok) throw new Error('No se pudo leer el repositorio');
-  const data = await r.json();
-  return data.index || [];
-}
-async function apiAddLote(payload){
-  const r = await fetch('/api/lotes', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify(payload)
+// ---- API ------------------------------------------------------------
+async function apiJson(url, opts){
+  const o = opts || {};
+  const r = await fetch(url, {
+    ...o,
+    headers: { ...(o.body ? {'Content-Type':'application/json'} : {}), ...authHeaders(), ...(o.headers||{}) }
   });
-  if (!r.ok) throw new Error((await r.json().catch(()=>({}))).error || 'Error al guardar el lote');
-  return r.json();
-}
-async function apiDeleteLote(id){
-  const r = await fetch('/api/lote/' + encodeURIComponent(id), { method: 'DELETE', headers: authHeaders() });
-  if (!r.ok) throw new Error('No se pudo borrar el lote');
-}
-async function apiClearRepo(){
-  const r = await fetch('/api/lotes', { method: 'DELETE', headers: authHeaders() });
-  if (!r.ok) throw new Error('No se pudo vaciar el repositorio');
-}
-async function apiSearch(queries){
-  const r = await fetch('/api/search', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ queries })
-  });
-  if (!r.ok) throw new Error('Error al buscar');
-  const data = await r.json();
-  return data.results || [];
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok){
+    const err = new Error(data.error || ('Error ' + r.status));
+    err.code = data.code;
+    throw err;
+  }
+  return data;
 }
 
-// ---- CPE -> afiliado extraction ----
-function analyzeCpeGroup(cpes){
-  const clean = cpes.filter(c => /^\d+$/.test(c));
-  if (clean.length < 2){
-    return cpes.map(c => extractWithFallback(c));
-  }
-  const len = clean[0].length;
-  if (!clean.every(c => c.length === len)){
-    return cpes.map(c => extractWithFallback(c));
-  }
-  let prefixLen = 0;
-  for (let p = 0; p < len; p++){
-    const ch = clean[0][p];
-    if (clean.every(c => c[p] === ch)) prefixLen++; else break;
-  }
-  let suffixLen = 0;
-  for (let s = 0; s < len; s++){
-    const ch = clean[0][len-1-s];
-    if (clean.every(c => c[c.length-1-s] === ch)) suffixLen++; else break;
-  }
-  if (prefixLen + suffixLen >= len || (len - prefixLen - suffixLen) < 1){
-    return cpes.map(c => extractWithFallback(c));
-  }
-  return cpes.map(c => {
-    if (!/^\d+$/.test(c) || c.length !== len) return extractWithFallback(c);
-    const mid = c.slice(prefixLen, len - suffixLen);
-    return mid ? String(parseInt(mid,10)) : null;
-  });
-}
-function extractWithFallback(c){
-  if (/^\d+$/.test(c) && c.endsWith(KNOWN_SUFFIX) && c.length > KNOWN_SUFFIX.length + 1){
-    const mid = c.slice(2, c.length - KNOWN_SUFFIX.length);
-    if (mid) return String(parseInt(mid,10));
-  }
-  return null;
-}
+const apiGetIndex   = () => apiJson('/api/lotes').then(d => d.index || []);
+const apiAddLote    = p  => apiJson('/api/lotes', { method:'POST', body: JSON.stringify(p) });
+const apiDeleteLote = id => apiJson('/api/lote/' + encodeURIComponent(id), { method:'DELETE' });
+const apiClearRepo  = () => apiJson('/api/lotes', { method:'DELETE' });
+const apiSearch     = q  => apiJson('/api/search', { method:'POST', body: JSON.stringify({ queries:q }) });
+const apiPendientes = id => apiJson('/api/lote/' + encodeURIComponent(id)).then(d => d.rows || []);
+const apiCorregir   = (id, body) => apiJson('/api/lote/' + encodeURIComponent(id), { method:'PATCH', body: JSON.stringify(body) });
 
-// ---- PDF cupones parsing ----
+// ---- lectura de archivos --------------------------------------------
 if (window.pdfjsLib){
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 }
 
-async function extractPdfPagesText(file){
-  const buf = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+async function extractPdfPagesText(buffer){
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
   const pages = [];
   for (let p = 1; p <= pdf.numPages; p++){
-    const page = await pdf.getPage(p);
-    const content = await page.getTextContent();
+    const content = await (await pdf.getPage(p)).getTextContent();
     pages.push(content.items.map(it => it.str).join('\n'));
   }
   return pages;
 }
 
-function parseCuponPage(text){
-  const cpeMatch = text.match(/(?<!\d)(\d{19})(?!\d)/);
-  if (!cpeMatch) return null;
-  const cpe = cpeMatch[1];
-  const afiliado = extractWithFallback(cpe);
+function readSheetRows(buffer){
+  const wb = XLSX.read(new Uint8Array(buffer), { type:'array' });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(sheet, { header:1, defval:'', raw:false });
+}
 
-  let nombre = '';
-  const afterApross = text.includes('APROSS') ? text.split('APROSS')[1] : text;
-  const idMatch = afterApross.match(/\d{8}/);
-  if (idMatch) nombre = afterApross.slice(0, idMatch.index).replace(/\s+/g, ' ').trim();
+/**
+ * Sube las boletas de un PDF agrupadas en tandas.
+ *
+ * Van varias páginas por PDF en lugar de una: las páginas de un mismo
+ * archivo comparten las fuentes embebidas, y eso baja el peso de 183 KB a
+ * 53 KB por boleta (medido sobre un cupón real de 40 páginas). También
+ * entra en juego el límite de 4,5 MB del body de una función de Vercel, de
+ * ahí el tope de payload.
+ */
+const MAX_PAGINAS_POR_BLOB = 25;
+const MAX_PAYLOAD = 3200000;
 
-  const importeMatch = text.match(/\$\s?[\d.,]+/);
-  const importe = importeMatch ? importeMatch[0].trim() : '';
-  const vencMatch = text.match(/\b\d{2}\/\d{2}\/\d{4}\b/);
-  const vencimiento = vencMatch ? vencMatch[0] : '';
-  const convenio = text.includes('APROSS') ? 'APROSS' : '';
+async function subirPaginas(buffer, loteId, rows, onProgress){
+  const src = await PDFLib.PDFDocument.load(buffer, { ignoreEncryption:true });
+  let guardadas = 0, hechas = 0;
 
+  async function subirGrupo(grupo){
+    const doc = await PDFLib.PDFDocument.create();
+    const paginas = await doc.copyPages(src, grupo.map(r => r.page - 1));
+    paginas.forEach(p => doc.addPage(p));
+    const b64 = await doc.saveAsBase64();
+
+    // si el grupo quedó muy pesado para un request, se parte al medio
+    if (b64.length > MAX_PAYLOAD && grupo.length > 1){
+      const mitad = Math.ceil(grupo.length / 2);
+      await subirGrupo(grupo.slice(0, mitad));
+      await subirGrupo(grupo.slice(mitad));
+      return;
+    }
+
+    const d = await apiJson('/api/boletas-pdf', {
+      method:'POST',
+      body: JSON.stringify({ loteId, chunk: { b64, pages: grupo.map(r => r.page) } })
+    });
+    guardadas += d.stored || 0;
+    hechas += grupo.length;
+    if (onProgress) onProgress(Math.round((hechas / rows.length) * 100));
+  }
+
+  for (let i = 0; i < rows.length; i += MAX_PAGINAS_POR_BLOB){
+    await subirGrupo(rows.slice(i, i + MAX_PAGINAS_POR_BLOB));
+  }
+  return guardadas;
+}
+
+// ---- carga de lotes --------------------------------------------------
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropzone.classList.remove('drag');
+  if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', e => { if (e.target.files.length) handleFiles(e.target.files); });
+
+function logLine(name){
+  const el = document.createElement('div');
+  el.className = 'log-line';
+  el.innerHTML = `<span>${escapeHtml(name)}</span><span><span class="spinner"></span></span>`;
+  uploadLog.prepend(el);
   return {
-    cpe, afiliado, nombre, importe, vencimiento, convenio,
-    link: `https://siropagos.bancoroela.com.ar/Home/PagoOffLine/${cpe}/`
+    progreso(txt, pct){
+      el.innerHTML = `<span>${escapeHtml(name)}</span><span style="min-width:190px">${escapeHtml(txt)}` +
+        (pct == null ? '' : `<span class="bar"><i style="width:${pct}%"></i></span>`) + `</span>`;
+    },
+    ok(txt, detalle){
+      el.className = 'log-line ok';
+      el.innerHTML = `<span>${escapeHtml(name)}</span><b>${escapeHtml(txt)}` +
+        (detalle ? `<span class="log-detail">${escapeHtml(detalle)}</span>` : '') + `</b>`;
+    },
+    error(txt){
+      el.className = 'log-line err';
+      el.innerHTML = `<span>${escapeHtml(name)}</span><b>${escapeHtml(txt)}</b>`;
+    }
   };
 }
 
-async function parsePdfCupones(file){
-  const pages = await extractPdfPagesText(file);
-  const rows = [];
-  let convenio = '';
-  for (const text of pages){
-    const parsed = parseCuponPage(text);
-    if (!parsed) continue;
-    if (!convenio && parsed.convenio) convenio = parsed.convenio;
-    rows.push({
-      cpe: parsed.cpe,
-      afiliado: parsed.afiliado,
-      nombre: parsed.nombre,
-      importe: parsed.importe,
-      vencimiento: parsed.vencimiento,
-      link: parsed.link
-    });
-  }
-  return { convenio, cuenta: '', dataRows: rows.length ? rows : null, isPdf: true };
-}
-
-// ---- file parsing ----
-function readFileAsRows(file){
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = e => {
-      try{
-        const data = new Uint8Array(e.target.result);
-        const wb = XLSX.read(data, { type: 'array' });
-        const sheet = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
-        resolve(rows);
-      }catch(err){ reject(err); }
-    };
-    reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-function parseSiroSheet(rows){
-  let convenio = '', cuenta = '', headerIdx = -1;
-  for (let i = 0; i < rows.length; i++){
-    const r = rows[i];
-    const c0 = String(r[0] ?? '').trim().toLowerCase();
-    if (c0 === 'convenio:') convenio = String(r[1] ?? '').trim();
-    if (c0.startsWith('cuenta cte')) cuenta = String(r[1] ?? '').trim();
-    if (c0 === 'cpe'){ headerIdx = i; break; }
-  }
-  if (headerIdx === -1){
-    // no encontramos el header esperado — probablemente no es este formato
-    return { convenio, cuenta, dataRows: null };
-  }
-  const dataRows = [];
-  for (let i = headerIdx + 1; i < rows.length; i++){
-    const r = rows[i];
-    const cpe = String(r[0] ?? '').trim();
-    if (!cpe) continue;
-    const link = String(r[2] ?? '').trim();
-    dataRows.push({ cpe, link });
-  }
-  return { convenio, cuenta, dataRows };
-}
-
 async function handleFiles(fileList){
-  const files = Array.from(fileList);
-
-  for (const file of files){
-    const line = document.createElement('div');
-    line.className = 'log-line';
-    line.innerHTML = `<span>${escapeHtml(file.name)}</span><span><span class="spinner"></span></span>`;
-    uploadLog.prepend(line);
-
+  for (const file of Array.from(fileList)){
+    const log = logLine(file.name);
     try{
-      const isPdf = /\.pdf$/i.test(file.name);
-      let convenio, cuenta, dataRows, finalRows, fileType;
-
-      if (isPdf){
-        fileType = 'pdf';
-        ({ convenio, cuenta, dataRows } = await parsePdfCupones(file));
-        if (dataRows === null){
-          line.className = 'log-line err';
-          line.innerHTML = `<span>${escapeHtml(file.name)}</span><b>No se pudo leer ningún cupón en este PDF — se omitió</b>`;
-          continue;
-        }
-        finalRows = dataRows; // ya vienen con afiliado, nombre, importe, vencimiento, link calculados
-      } else {
-        fileType = 'excel';
-        const rows = await readFileAsRows(file);
-        ({ convenio, cuenta, dataRows } = parseSiroSheet(rows));
-
-        if (dataRows === null){
-          line.className = 'log-line err';
-          line.innerHTML = `<span>${escapeHtml(file.name)}</span><b>No tiene el formato esperado (falta columna CPE) — se omitió</b>`;
-          continue;
-        }
-        if (!dataRows.length){
-          line.className = 'log-line err';
-          line.innerHTML = `<span>${escapeHtml(file.name)}</span><b>Sin filas de datos — se omitió</b>`;
-          continue;
-        }
-
-        const afiliados = analyzeCpeGroup(dataRows.map(d => d.cpe));
-        finalRows = dataRows.map((d, i) => ({
-          cpe: d.cpe,
-          afiliado: afiliados[i],
-          nombre: '',
-          importe: '',
-          vencimiento: '',
-          link: d.link
-        }));
-      }
-
-      const failedCount = finalRows.filter(r => !r.afiliado).length;
-      const result = await apiAddLote({ filename: file.name, convenio, cuenta, fileType, rows: finalRows });
-
-      const sample = finalRows.map(r => r.afiliado).filter(Boolean).slice(0,3).join(', ');
-      line.className = 'log-line ok';
-      line.innerHTML = `<span>${escapeHtml(file.name)}</span><b>${result.rowCount} filas (${fileType}) · ej: ${escapeHtml(sample)}${result.failedCount ? ' · ' + result.failedCount + ' sin extraer' : ''}</b>`;
-
+      const buffer = await file.arrayBuffer();
+      if (/\.pdf$/i.test(file.name)) await cargarPdf(file, buffer, log);
+      else await cargarExcel(file, buffer, log);
     }catch(err){
-      line.className = 'log-line err';
-      line.innerHTML = `<span>${escapeHtml(file.name)}</span><b>Error: ${escapeHtml(err.message)}</b>`;
+      log.error('Error: ' + err.message);
     }
   }
-
   fileInput.value = '';
   renderRepo();
 }
 
+async function cargarPdf(file, buffer, log){
+  log.progreso('Leyendo cupones…');
+  // pdf.js consume el ArrayBuffer, así que se le pasa una copia
+  const parsed = S.parseCupones(await extractPdfPagesText(buffer.slice(0)));
+
+  if (!parsed.rows.length){
+    log.error('No se reconoció ningún cupón en este PDF — se omitió');
+    return;
+  }
+
+  log.progreso('Guardando ' + parsed.rows.length + ' boletas…');
+  const alta = await apiAddLote({
+    filename: file.name,
+    convenio: parsed.convenio,
+    cuenta: parsed.cuenta,
+    cuentaSiro: parsed.cuenta,
+    periodo: parsed.periodo,
+    fileType: 'pdf',
+    rows: parsed.rows
+  });
+
+  let guardadas = 0, avisoPdf = '';
+  if (!window.PDFLib){
+    avisoPdf = 'no se pudo cargar pdf-lib, quedan sólo los links de pago';
+  } else {
+    try{
+      guardadas = await subirPaginas(buffer, alta.id, parsed.rows,
+        pct => log.progreso('Guardando PDF de cada boleta… ' + pct + '%', pct));
+    }catch(e){
+      avisoPdf = e.code === 'blob_no_configurado'
+        ? 'falta conectar un Blob store: quedan sólo los links de pago'
+        : 'no se pudieron guardar los PDF (' + e.message + ')';
+    }
+  }
+
+  const detalles = [];
+  if (parsed.periodo) detalles.push(parsed.periodo);
+  detalles.push(guardadas + ' con PDF descargable');
+  if (parsed.paginasOmitidas.length) detalles.push(parsed.paginasOmitidas.length + ' páginas sin cupón');
+  if (alta.failedCount) detalles.push(alta.failedCount + ' sin afiliado');
+  if (alta.reemplazo) detalles.push('reemplazó una carga anterior del mismo archivo');
+  if (avisoPdf) detalles.push(avisoPdf);
+
+  log.ok(parsed.rows.length + ' boletas', detalles.join(' · '));
+}
+
+async function cargarExcel(file, buffer, log){
+  log.progreso('Leyendo planilla…');
+  const parsed = S.parseLinksDePago(readSheetRows(buffer));
+
+  if (parsed.rows === null){
+    log.error('No tiene el formato esperado (falta la columna CPE) — se omitió');
+    return;
+  }
+  if (!parsed.rows.length){
+    log.error('Sin filas de datos — se omitió');
+    return;
+  }
+
+  const alta = await apiAddLote({
+    filename: file.name,
+    convenio: parsed.convenio,
+    cuenta: parsed.cuenta,
+    cuentaSiro: parsed.cuentaSiro,
+    periodo: '',
+    fileType: 'excel',
+    rows: parsed.rows
+  });
+
+  const detalles = ['sólo links de pago, el Excel no trae los PDF'];
+  if (alta.failedCount) detalles.push(alta.failedCount + ' sin afiliado');
+  if (alta.reemplazo) detalles.push('reemplazó una carga anterior del mismo archivo');
+
+  log.ok(parsed.rows.length + ' filas', detalles.join(' · '));
+}
+
+// ---- repositorio -----------------------------------------------------
 async function renderRepo(){
   let index = [];
   try{
@@ -504,65 +498,124 @@ async function renderRepo(){
     repoTableWrap.innerHTML = `<div class="repo-empty" style="color:var(--red);">${escapeHtml(e.message)}</div>`;
     return;
   }
-  statusBadge.textContent = index.length ? `${index.length} lotes en el repositorio` : 'Repositorio vacío';
+
+  const totalRows = index.reduce((s,e) => s + (e.rowCount||0), 0);
+  statusBadge.textContent = index.length
+    ? totalRows + ' boletas en ' + index.length + ' lote' + (index.length===1?'':'s')
+    : 'Repositorio vacío';
 
   if (!index.length){
     repoTableWrap.innerHTML = '<div class="repo-empty">Todavía no cargaste ningún lote.</div>';
     repoStats.innerHTML = '';
+    reviewPanel.classList.add('hidden');
     return;
   }
 
   const sorted = [...index].sort((a,b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
-  const rowsHtml = sorted.map(e => `
-    <tr>
-      <td>${escapeHtml(e.filename)}</td>
-      <td>${e.fileType === 'pdf' ? 'PDF cupones' : 'Excel SIRO'}</td>
-      <td>${escapeHtml(e.convenio || '—')}</td>
-      <td>${escapeHtml(e.cuenta || '—')}</td>
-      <td>${e.rowCount}</td>
-      <td>${e.failedCount ? '<span style="color:var(--red)">' + e.failedCount + '</span>' : '0'}</td>
-      <td>${new Date(e.uploadedAt).toLocaleString('es-AR')}</td>
-      <td><button class="del-btn" data-id="${e.id}">Quitar</button></td>
-    </tr>
-  `).join('');
-
   repoTableWrap.innerHTML = `
     <div class="table-scroll">
       <table>
-        <thead><tr><th>Archivo</th><th>Tipo</th><th>Convenio</th><th>Cuenta</th><th>Filas</th><th>Sin extraer</th><th>Cargado</th><th></th></tr></thead>
-        <tbody>${rowsHtml}</tbody>
+        <thead><tr><th>Archivo</th><th>Tipo</th><th>Periodo</th><th>Convenio</th><th>Cuenta</th>
+          <th>Boletas</th><th>Con PDF</th><th>Sin afiliado</th><th>Cargado</th><th></th></tr></thead>
+        <tbody>${sorted.map(e => `
+          <tr>
+            <td>${escapeHtml(e.filename)}</td>
+            <td>${e.fileType === 'pdf' ? 'PDF cupones' : 'Excel SIRO'}</td>
+            <td>${escapeHtml(e.periodo || '—')}</td>
+            <td>${escapeHtml(e.convenio || '—')}</td>
+            <td>${escapeHtml(e.cuenta || '—')}</td>
+            <td>${e.rowCount}</td>
+            <td>${e.fileType === 'pdf' ? (e.pdfCount || 0) : '—'}</td>
+            <td>${e.failedCount ? '<span style="color:var(--red)">' + e.failedCount + '</span>' : '0'}</td>
+            <td>${new Date(e.uploadedAt).toLocaleString('es-AR')}</td>
+            <td><button class="del-btn" data-id="${escapeHtml(e.id)}">Quitar</button></td>
+          </tr>`).join('')}
+        </tbody>
       </table>
     </div>`;
 
-  const totalRows = index.reduce((s,e) => s + e.rowCount, 0);
+  const totalPdf    = index.reduce((s,e) => s + (e.pdfCount||0), 0);
   const totalFailed = index.reduce((s,e) => s + (e.failedCount||0), 0);
-  repoStats.innerHTML = `<span><b>${totalRows}</b> boletas totales</span><span><b>${index.length}</b> lotes</span><span><b>${totalFailed}</b> sin poder extraer afiliado</span>`;
+  repoStats.innerHTML =
+    `<span><b>${totalRows}</b> boletas totales</span>` +
+    `<span><b>${index.length}</b> lotes</span>` +
+    `<span><b>${totalPdf}</b> con PDF descargable</span>` +
+    `<span><b>${totalFailed}</b> sin afiliado</span>`;
 
   repoTableWrap.querySelectorAll('.del-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       btn.disabled = true;
-      try{
-        await apiDeleteLote(btn.dataset.id);
-      }catch(e){ alert('No se pudo borrar: ' + e.message); }
+      try{ await apiDeleteLote(btn.dataset.id); }
+      catch(e){ alert('No se pudo borrar: ' + e.message); }
       renderRepo();
     });
+  });
+
+  renderRevision(index.filter(e => e.failedCount > 0));
+}
+
+async function renderRevision(lotesConFallas){
+  if (!lotesConFallas.length){ reviewPanel.classList.add('hidden'); return; }
+  reviewPanel.classList.remove('hidden');
+  reviewWrap.innerHTML = '<div class="repo-empty"><span class="spinner"></span></div>';
+
+  const bloques = [];
+  for (const lote of lotesConFallas){
+    let pendientes = [];
+    try{ pendientes = await apiPendientes(lote.id); }catch(e){ continue; }
+    if (!pendientes.length) continue;
+    bloques.push({ lote, pendientes });
+  }
+
+  if (!bloques.length){ reviewPanel.classList.add('hidden'); return; }
+
+  reviewWrap.innerHTML = bloques.map(({lote, pendientes}) => `
+    <div style="margin-bottom:16px;">
+      <div class="step-label">${escapeHtml(lote.filename)}</div>
+      ${pendientes.map(r => `
+        <div class="review-row" data-lote="${escapeHtml(lote.id)}" data-cpe="${escapeHtml(r.cpe)}">
+          <span>CPE ${escapeHtml(r.cpe)}</span>
+          <span class="grow">${escapeHtml(r.nombre || 'sin nombre')}${r.revisar ? ' · ' + escapeHtml(r.revisar) : ''}</span>
+          <input type="text" placeholder="N° afiliado" inputmode="numeric">
+          <button class="pdf-btn">Guardar</button>
+        </div>`).join('')}
+    </div>`).join('');
+
+  reviewWrap.querySelectorAll('.review-row').forEach(row => {
+    const input = row.querySelector('input');
+    const btn   = row.querySelector('button');
+    const guardar = async () => {
+      const val = input.value.trim();
+      if (!val) return;
+      btn.disabled = true;
+      try{
+        await apiCorregir(row.dataset.lote, { cpe: row.dataset.cpe, afiliado: val });
+        row.innerHTML = '<span style="color:var(--green)">Guardado: afiliado ' + escapeHtml(S.normalizeAfiliado(val)) + '</span>';
+      }catch(e){
+        btn.disabled = false;
+        alert('No se pudo guardar: ' + e.message);
+      }
+    };
+    btn.addEventListener('click', guardar);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') guardar(); });
   });
 }
 
 document.getElementById('clearRepoBtn').addEventListener('click', async () => {
-  if (!confirm('¿Vaciar todo el repositorio? Esto borra todos los lotes cargados.')) return;
-  try{
-    await apiClearRepo();
-  }catch(e){ alert('No se pudo vaciar: ' + e.message); }
+  if (!confirm('¿Vaciar todo el repositorio? Borra todos los lotes y los PDF guardados.')) return;
+  try{ await apiClearRepo(); }
+  catch(e){ alert('No se pudo vaciar: ' + e.message); }
   renderRepo();
 });
 
-// ---- search ----
-document.getElementById('searchBtn').addEventListener('click', runSearch);
+// ---- búsqueda --------------------------------------------------------
+searchBtn.addEventListener('click', runSearch);
+queryBox.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) runSearch();
+});
 
 async function runSearch(){
-  const raw = queryBox.value.split(/[\n,;]/).map(s => s.trim()).filter(Boolean);
-  const queries = [...new Set(raw.map(normalizeAfiliado))].filter(Boolean);
+  const queries = queryBox.value.split(/[\n,;\s]+/).map(s => s.trim()).filter(Boolean);
 
   if (!queries.length){
     resultsContainer.innerHTML = '<div class="empty-note">Ingresá al menos un número de afiliado.</div>';
@@ -571,73 +624,159 @@ async function runSearch(){
     return;
   }
 
-  const btn = document.getElementById('searchBtn');
-  btn.disabled = true; btn.textContent = 'Buscando…';
-
-  let blocks;
+  searchBtn.disabled = true;
+  searchBtn.textContent = 'Buscando…';
   try{
-    blocks = await apiSearch(queries);
+    const data = await apiSearch(queries);
+    lastResults = [];
+    data.results.forEach(({query, matches}) => {
+      matches.forEach(m => lastResults.push({
+        afiliado_buscado: query, afiliado: m.afiliado, nombre: m.nombre,
+        importe: m.importe, vencimiento: m.vencimiento, periodo: m.periodo,
+        convenio: m.convenio, cpe: m.cpe, lote: m.filename, link: m.link
+      }));
+    });
+    renderResults(data.results);
   }catch(e){
-    resultsContainer.innerHTML = `<div class="empty-note" style="color:var(--red);">Error al buscar: ${escapeHtml(e.message)}</div>`;
-    resultsPanel.classList.remove('hidden');
-    btn.disabled = false; btn.textContent = 'Buscar en repositorio';
-    return;
+    resultsContainer.innerHTML =
+      `<div class="empty-note" style="color:var(--red);">Error al buscar: ${escapeHtml(e.message)}</div>`;
   }
-
-  lastResults = [];
-  blocks.forEach(({query, matches}) => {
-    lastResults.push(...matches.map(m => ({ afiliado_buscado: query, ...m })));
-  });
-
-  renderResults(blocks);
   resultsPanel.classList.remove('hidden');
-  btn.disabled = false; btn.textContent = 'Buscar en repositorio';
+  searchBtn.disabled = false;
+  searchBtn.textContent = 'Buscar';
 }
 
 function renderResults(blocks){
   resultsContainer.innerHTML = '';
-  blocks.forEach(({query, matches}) => {
+
+  blocks.forEach(({query, ingresado, comoCpe, matches}) => {
     const block = document.createElement('div');
     block.className = 'result-block';
+
     const head = document.createElement('div');
     head.className = 'rb-head';
-    head.innerHTML = `
-      <span><span class="query">Afiliado ${escapeHtml(query)}</span> <span class="rb-count">— ${matches.length} coincidencia${matches.length===1?'':'s'}</span></span>
-      <span class="stamp ${matches.length ? 'found':'notfound'}">${matches.length ? 'Encontrado' : 'No encontrado'}</span>
-    `;
+    head.innerHTML =
+      `<span><span class="query">Afiliado ${escapeHtml(query)}</span> ` +
+      `<span class="rb-count">— ${matches.length} boleta${matches.length===1?'':'s'}` +
+      (comoCpe ? ' · buscado por CPE ' + escapeHtml(ingresado) : '') + `</span></span>` +
+      `<span class="stamp ${matches.length ? 'found':'notfound'}">${matches.length ? 'Encontrado' : 'No encontrado'}</span>`;
     block.appendChild(head);
 
-    if (matches.length){
-      const scroll = document.createElement('div');
-      scroll.className = 'table-scroll';
-      const table = document.createElement('table');
-      table.innerHTML = '<thead><tr><th>Lote</th><th>Tipo</th><th>Nombre</th><th>Importe</th><th>Vencimiento</th><th>Convenio</th><th>CPE</th><th>Link de pago</th></tr></thead>';
-      const tbody = document.createElement('tbody');
-      matches.forEach(m => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${escapeHtml(m.filename)}</td>
-          <td>${m.fileType === 'pdf' ? 'PDF' : 'Excel'}</td>
-          <td>${escapeHtml(m.nombre || '—')}</td>
-          <td>${escapeHtml(m.importe || '—')}</td>
-          <td>${escapeHtml(m.vencimiento || '—')}</td>
-          <td>${escapeHtml(m.convenio||'—')}</td>
-          <td class="match-col">${escapeHtml(m.cpe)}</td>
-          <td><a href="${escapeHtml(m.link)}" target="_blank" rel="noopener">${escapeHtml(m.link)}</a></td>
-        `;
-        tbody.appendChild(tr);
-      });
-      table.appendChild(tbody);
-      scroll.appendChild(table);
-      block.appendChild(scroll);
-    } else {
+    if (!matches.length){
       const note = document.createElement('div');
       note.className = 'empty-note';
       note.textContent = 'No aparece en ningún lote cargado en el repositorio.';
       block.appendChild(note);
+      resultsContainer.appendChild(block);
+      return;
     }
+
+    const scroll = document.createElement('div');
+    scroll.className = 'table-scroll';
+    const table = document.createElement('table');
+    table.innerHTML =
+      '<thead><tr><th>Boleta</th><th>Nombre</th><th>Importe</th><th>Vencimiento</th>' +
+      '<th>Periodo</th><th>CPE</th><th>Lote</th><th>Link de pago</th></tr></thead>';
+
+    const tbody = document.createElement('tbody');
+    matches.forEach(m => {
+      const tr = document.createElement('tr');
+
+      const acciones = document.createElement('td');
+      acciones.className = 'cell-actions';
+      if (m.hasPdf){
+        const ver = document.createElement('button');
+        ver.className = 'pdf-btn';
+        ver.textContent = 'Ver PDF';
+        ver.addEventListener('click', () => abrirBoleta(m, false, ver));
+        const baj = document.createElement('button');
+        baj.className = 'pdf-btn ghost';
+        baj.textContent = 'Descargar';
+        baj.addEventListener('click', () => abrirBoleta(m, true, baj));
+        acciones.append(ver, baj);
+      } else {
+        const s = document.createElement('span');
+        s.className = 'no-pdf';
+        s.textContent = m.fileType === 'pdf' ? 'PDF no guardado' : 'sólo link';
+        acciones.appendChild(s);
+      }
+      tr.appendChild(acciones);
+
+      const celdas = [
+        (m.nombre || '—') + (m.revisar ? ' ⚑' : ''),
+        m.importe || '—',
+        m.vencimiento || '—',
+        m.periodo || '—'
+      ];
+      celdas.forEach(v => {
+        const td = document.createElement('td');
+        td.textContent = v;
+        tr.appendChild(td);
+      });
+
+      const tdCpe = document.createElement('td');
+      tdCpe.className = 'match-col';
+      tdCpe.textContent = m.cpe;
+      tr.appendChild(tdCpe);
+
+      const tdLote = document.createElement('td');
+      tdLote.textContent = m.filename;
+      tr.appendChild(tdLote);
+
+      const tdLink = document.createElement('td');
+      const a = document.createElement('a');
+      a.href = m.link; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = 'Pagar en SIRO';
+      tdLink.appendChild(a);
+      tr.appendChild(tdLink);
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    scroll.appendChild(table);
+    block.appendChild(scroll);
     resultsContainer.appendChild(block);
   });
+}
+
+/**
+ * Trae el PDF de la boleta. Va por /api/boleta con la contraseña en el
+ * header en lugar de linkear el blob, que es público.
+ *
+ * La pestaña se abre antes del await: si se abriera después, el navegador
+ * la trata como popup y la bloquea.
+ */
+async function abrirBoleta(m, descargar, btn){
+  const ventana = descargar ? null : window.open('', '_blank');
+  const textoOriginal = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '…';
+  try{
+    const r = await fetch('/api/boleta?lote=' + encodeURIComponent(m.loteId) + '&page=' + m.page,
+                          { headers: authHeaders() });
+    if (!r.ok){
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.error || ('Error ' + r.status));
+    }
+    const url = URL.createObjectURL(await r.blob());
+    if (descargar){
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'boleta-' + m.afiliado + (m.vencimiento ? '-' + m.vencimiento.replace(/\//g,'-') : '') + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } else if (ventana){
+      ventana.location = url;
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }catch(e){
+    if (ventana) ventana.close();
+    alert('No se pudo abrir la boleta: ' + e.message);
+  }
+  btn.disabled = false;
+  btn.textContent = textoOriginal;
 }
 
 document.getElementById('exportBtn').addEventListener('click', () => {
@@ -647,8 +786,6 @@ document.getElementById('exportBtn').addEventListener('click', () => {
   XLSX.utils.book_append_sheet(wb, ws, 'Coincidencias');
   XLSX.writeFile(wb, 'coincidencias_repositorio_siro.csv');
 });
-
-// init: renderRepo() se llama luego de un login exitoso (ver tryEnter)
 </script>
 </body>
 </html>
