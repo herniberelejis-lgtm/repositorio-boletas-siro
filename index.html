@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>APROSS · Buscador de Boletas</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;500;600&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <!-- pdf-lib parte el PDF de cupones en una boleta por página. Si no carga,
@@ -13,114 +13,276 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="/siro-parse.js"></script>
 <style>
+  /* --------------------------------------------------------------------
+     Paleta derivada del logo de APROSS.
+     --------------------------------------------------------------------
+     El verde (#00AB99) y el rojo (#FF2800) salen del propio logo.png. Pero
+     el verde de marca sobre blanco da 2,88:1 de contraste, así que no sirve
+     ni como texto ni como fondo de un botón con texto blanco: no llega al
+     4,5:1 que pide WCAG AA. Por eso hay tres tokens en lugar de uno.
+
+       --brand       identidad: logo, bordes, barras, acentos (nunca texto)
+       --brand-ink   el verde cuando tiene que ser texto      5,4:1
+       --brand-fill  fondo de botón con texto blanco encima   4,8:1
+
+     El texto es negro neutro y los grises no tienen tinte verde, para que
+     la lectura quede sobria y el verde se note como acento, no como tema.
+     -------------------------------------------------------------------- */
   :root{
-    --bg:#F4F7F6; --surface:#FFFFFF; --surface-2:#EEF4F3; --border:#DCE8E6;
-    --text:#16241F; --text-dim:#5B6E6A;
-    --teal:#00AB99; --teal-dim:#00897A;
-    --green:#00AB99; --red:#FF2800;
+    --bg:#F7F8F9; --surface:#FFFFFF; --surface-2:#F1F3F4;
+    --border:#DFE3E6; --border-strong:#C6CDD1;
+
+    --ink:#111418;        /* 18,5:1 sobre blanco */
+    --ink-soft:#5A6169;   /*  6,3:1 sobre blanco */
+
+    --brand:#00AB99;
+    --brand-ink:#00786B;
+    --brand-fill:#008073;
+    --brand-wash:#E8F7F5;
+
+    --danger:#FF2800;
+    --danger-ink:#C41E00;
+    --danger-wash:#FFF1EE;
+
+    --warn-ink:#8A5200;
+    --warn-border:#E0A020;
+    --warn-wash:#FFF9EF;
+
+    --radius:8px;
+    --shadow:0 1px 2px rgba(17,20,24,.05), 0 1px 8px rgba(17,20,24,.04);
+
+    /* densidad de tablero: la herramienta es de datos, no de lectura */
+    --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px;
   }
+
   *{box-sizing:border-box;}
-  body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;min-height:100vh;}
-  .wrap{max-width:1140px;margin:0 auto;padding:40px 24px 90px;}
-  header{border-bottom:1px solid var(--border);padding-bottom:22px;margin-bottom:28px;display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;}
-  h1{font-family:'Source Serif 4',serif;font-weight:700;font-size:29px;margin:0 0 6px;letter-spacing:-0.01em;}
-  .subtitle{color:var(--text-dim);font-size:13.5px;margin:0;max-width:560px;line-height:1.5;}
-  .badge{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--teal);border:1px solid var(--teal-dim);padding:4px 10px;border-radius:100px;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;}
 
-  .panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:22px 24px;margin-bottom:18px;}
-  .panel h2{font-family:'Source Serif 4',serif;font-size:16px;font-weight:600;margin:0 0 4px;}
-  .panel .desc{color:var(--text-dim);font-size:12.5px;margin:0 0 16px;}
-  .step-label{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--teal);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:'Fira Sans',system-ui,-apple-system,sans-serif;
+    font-size:14px; line-height:1.5; min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
 
-  #dropzone{border:1.5px dashed var(--border);border-radius:8px;padding:30px 20px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;}
-  #dropzone:hover,#dropzone.drag{border-color:var(--teal-dim);background:var(--surface-2);}
-  #dropzone p{margin:0;color:var(--text-dim);font-size:13px;}
-  #dropzone .main-cta{color:var(--text);font-size:14.5px;margin-bottom:4px;}
+  /* Un solo anillo de foco para todo, visible con teclado. Se usa
+     --brand-fill y no --brand porque el de marca no llega a 3:1. */
+  :focus-visible{ outline:2px solid var(--brand-fill); outline-offset:2px; border-radius:4px; }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation-duration:.01ms !important; animation-iteration-count:1 !important;
+       transition-duration:.01ms !important; }
+  }
+
+  .wrap{max-width:1180px;margin:0 auto;padding:var(--sp-6) var(--sp-5) 80px;}
+
+  header{
+    border-bottom:1px solid var(--border); padding-bottom:var(--sp-5);
+    margin-bottom:var(--sp-5); display:flex; justify-content:space-between;
+    align-items:flex-end; gap:var(--sp-4); flex-wrap:wrap;
+  }
+  .brand-logo{height:34px;width:auto;display:block;}
+  h1{font-size:24px;font-weight:600;margin:var(--sp-3) 0 var(--sp-1);letter-spacing:-0.01em;color:var(--ink);}
+  .subtitle{color:var(--ink-soft);font-size:13px;margin:0;max-width:560px;}
+
+  /* El badge de estado lleva un punto verde: el color acompaña, pero el
+     dato lo comunica el texto, que va en negro. */
+  .badge{
+    display:inline-flex;align-items:center;gap:var(--sp-2);
+    font-family:'Fira Code',ui-monospace,monospace;font-size:11.5px;
+    color:var(--ink);background:var(--surface);
+    border:1px solid var(--border);border-radius:100px;
+    padding:5px 12px;white-space:nowrap;
+  }
+  .badge::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--brand);flex:none;}
+
+  .panel{
+    background:var(--surface);border:1px solid var(--border);
+    border-radius:var(--radius);padding:var(--sp-5);margin-bottom:var(--sp-4);
+    box-shadow:var(--shadow);
+  }
+  .panel h2{font-size:15px;font-weight:600;margin:0 0 var(--sp-1);color:var(--ink);}
+  .panel .desc{color:var(--ink-soft);font-size:12.5px;margin:0 0 var(--sp-4);}
+  .step-label{
+    font-family:'Fira Code',ui-monospace,monospace;font-size:10.5px;
+    color:var(--brand-ink);letter-spacing:.09em;text-transform:uppercase;
+    font-weight:500;margin-bottom:var(--sp-1);
+  }
+
+  #dropzone{
+    border:1.5px dashed var(--border-strong);border-radius:var(--radius);
+    padding:var(--sp-6) var(--sp-4);text-align:center;cursor:pointer;
+    transition:border-color .18s,background .18s;
+  }
+  #dropzone:hover,#dropzone.drag{border-color:var(--brand);background:var(--brand-wash);}
+  #dropzone p{margin:0;color:var(--ink-soft);font-size:12.5px;}
+  #dropzone .main-cta{color:var(--ink);font-size:14px;font-weight:500;margin-bottom:var(--sp-1);}
   #fileInput{display:none;}
 
-  #uploadLog{margin-top:14px;display:flex;flex-direction:column;gap:6px;}
-  .log-line{font-family:'IBM Plex Mono',monospace;font-size:12px;display:flex;justify-content:space-between;gap:12px;color:var(--text-dim);}
-  .log-line.ok b{color:var(--green);}
-  .log-line.err b{color:var(--red);}
+  #uploadLog{margin-top:var(--sp-4);display:flex;flex-direction:column;gap:var(--sp-2);}
+  .log-line{
+    font-family:'Fira Code',ui-monospace,monospace;font-size:12px;
+    display:flex;justify-content:space-between;align-items:flex-start;
+    gap:var(--sp-3);color:var(--ink-soft);
+    background:var(--surface-2);border-radius:6px;padding:var(--sp-2) var(--sp-3);
+    border-left:3px solid var(--border-strong);
+  }
+  .log-line b{color:var(--ink);font-weight:500;text-align:right;}
+  .log-line.ok{border-left-color:var(--brand);}
+  .log-line.ok b{color:var(--brand-ink);}
+  .log-line.err{border-left-color:var(--danger);background:var(--danger-wash);}
+  .log-line.err b{color:var(--danger-ink);}
+  .log-line .log-detail{display:block;color:var(--ink-soft);font-weight:400;margin-top:3px;}
 
-  table{width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:12.5px;}
-  th,td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;}
-  th{color:var(--text-dim);font-weight:500;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;}
-  .repo-empty{color:var(--text-dim);font-size:13px;padding:20px 0;text-align:center;}
-  .del-btn{background:transparent;border:1px solid var(--border);color:var(--red);font-size:11px;padding:4px 9px;border-radius:5px;cursor:pointer;}
-  .del-btn:hover{border-color:var(--red);}
+  table{width:100%;border-collapse:collapse;font-family:'Fira Code',ui-monospace,monospace;font-size:12px;}
+  th,td{padding:var(--sp-2) var(--sp-3);text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;}
+  th{
+    color:var(--ink-soft);font-weight:500;font-size:10px;text-transform:uppercase;
+    letter-spacing:.05em;background:var(--surface-2);
+  }
+  td{color:var(--ink);}
+  tbody tr:hover td{background:var(--surface-2);}
+  .table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  td.match-col{color:var(--brand-ink);font-weight:500;}
 
-  .stats-strip{display:flex;gap:24px;flex-wrap:wrap;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text-dim);margin-top:14px;padding-top:14px;border-top:1px solid var(--border);}
-  .stats-strip b{color:var(--teal);font-size:14px;}
+  .repo-empty{color:var(--ink-soft);font-size:13px;padding:var(--sp-5) 0;text-align:center;}
+  .del-btn{
+    background:transparent;border:1px solid var(--border-strong);color:var(--danger-ink);
+    font-family:'Fira Sans',sans-serif;font-size:11px;font-weight:500;
+    padding:4px 10px;border-radius:5px;cursor:pointer;transition:border-color .15s,background .15s;
+  }
+  .del-btn:hover{border-color:var(--danger);background:var(--danger-wash);}
 
-  .row{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;}
+  .stats-strip{
+    display:flex;gap:var(--sp-5);flex-wrap:wrap;
+    font-family:'Fira Code',ui-monospace,monospace;font-size:11.5px;color:var(--ink-soft);
+    margin-top:var(--sp-4);padding-top:var(--sp-4);border-top:1px solid var(--border);
+  }
+  .stats-strip b{color:var(--ink);font-size:15px;font-weight:600;display:block;}
+
+  .row{display:flex;gap:var(--sp-3);flex-wrap:wrap;align-items:flex-end;}
   .field{flex:1;min-width:220px;}
-  label{display:block;font-size:12px;color:var(--text-dim);margin-bottom:6px;}
-  textarea,input[type=text]{width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:10px 12px;font-family:'IBM Plex Mono',monospace;font-size:13.5px;}
-  textarea:focus,input:focus{outline:none;border-color:var(--teal-dim);}
-  textarea{resize:vertical;min-height:74px;line-height:1.5;}
+  label{display:block;font-size:12px;color:var(--ink-soft);margin-bottom:var(--sp-1);}
+  textarea,input[type=text],input[type=password]{
+    width:100%;background:var(--surface);border:1px solid var(--border-strong);
+    color:var(--ink);border-radius:6px;padding:9px 11px;
+    font-family:'Fira Code',ui-monospace,monospace;font-size:13px;
+  }
+  textarea:focus,input:focus{border-color:var(--brand-fill);}
+  textarea{resize:vertical;min-height:76px;}
 
-  button{background:var(--teal);color:#FFFFFF;border:none;font-family:'Inter',sans-serif;font-weight:600;font-size:13.5px;padding:10px 18px;border-radius:6px;cursor:pointer;transition:background .15s;}
-  button:hover{background:#00c4ae;}
-  button:disabled{background:var(--border);color:var(--text-dim);cursor:not-allowed;}
-  button.secondary{background:transparent;border:1px solid var(--border);color:var(--text-dim);}
-  button.secondary:hover{border-color:var(--teal-dim);color:var(--text);}
-  button.danger{background:transparent;border:1px solid var(--red);color:var(--red);}
-  button.danger:hover{background:rgba(217,112,95,0.1);}
+  button{
+    background:var(--brand-fill);color:#FFFFFF;border:none;
+    font-family:'Fira Sans',sans-serif;font-weight:500;font-size:13.5px;
+    padding:9px 18px;border-radius:6px;cursor:pointer;transition:background .15s;
+  }
+  button:hover{background:var(--brand-ink);}
+  button:disabled{background:var(--border-strong);color:#FFFFFF;cursor:not-allowed;}
+  button.secondary{background:transparent;border:1px solid var(--border-strong);color:var(--ink);}
+  button.secondary:hover{background:var(--surface-2);border-color:var(--brand);}
+  button.danger{background:transparent;border:1px solid var(--danger-ink);color:var(--danger-ink);}
+  button.danger:hover{background:var(--danger-wash);}
 
-  .results-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px;}
-  .stamp{display:inline-flex;align-items:center;gap:8px;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;padding:6px 14px;border-radius:100px;letter-spacing:.05em;text-transform:uppercase;border:1.5px solid;}
-  .stamp.found{color:var(--green);border-color:var(--green);}
-  .stamp.notfound{color:var(--red);border-color:var(--red);}
+  .results-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--sp-4);flex-wrap:wrap;gap:var(--sp-3);}
 
-  .result-block{border:1px solid var(--border);border-radius:8px;margin-bottom:14px;overflow:hidden;}
-  .result-block .rb-head{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:var(--surface-2);font-family:'IBM Plex Mono',monospace;font-size:12.5px;border-bottom:1px solid var(--border);}
-  .rb-head .query{color:var(--teal);font-weight:600;}
-  .rb-count{color:var(--text-dim);}
-  .table-scroll{overflow-x:auto;}
-  td.match-col{color:var(--teal);font-weight:600;}
-  td a{color:#7fb8e0;text-decoration:none;}
-  td a:hover{text-decoration:underline;}
-  tr:hover td{background:rgba(255,255,255,0.02);}
+  /* Encontrado / No encontrado: además del color, cambia la palabra y el
+     grosor del borde, para no depender sólo del color. */
+  .stamp{
+    display:inline-flex;align-items:center;gap:var(--sp-2);
+    font-family:'Fira Code',ui-monospace,monospace;font-size:11px;font-weight:600;
+    padding:4px 12px;border-radius:100px;letter-spacing:.05em;text-transform:uppercase;
+    border:1px solid;
+  }
+  .stamp.found{color:var(--brand-ink);border-color:var(--brand);background:var(--brand-wash);}
+  .stamp.notfound{color:var(--danger-ink);border-color:var(--danger);background:var(--danger-wash);}
 
-  .empty-note{color:var(--text-dim);font-size:13px;padding:16px;text-align:center;}
-  .hint{font-size:11.5px;color:var(--text-dim);margin-top:8px;line-height:1.5;}
-  .footer-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:8px;}
+  .result-block{border:1px solid var(--border);border-radius:var(--radius);margin-bottom:var(--sp-3);overflow:hidden;}
+  .result-block .rb-head{
+    display:flex;justify-content:space-between;align-items:center;gap:var(--sp-3);
+    padding:var(--sp-3) var(--sp-4);background:var(--surface-2);
+    font-family:'Fira Code',ui-monospace,monospace;font-size:12px;
+    border-bottom:1px solid var(--border);flex-wrap:wrap;
+  }
+  .rb-head .query{color:var(--ink);font-weight:600;}
+  .rb-count{color:var(--ink-soft);}
+
+  td a{color:var(--brand-ink);text-decoration:underline;text-underline-offset:2px;}
+  td a:hover{color:var(--ink);}
+
+  .empty-note{color:var(--ink-soft);font-size:12.5px;padding:var(--sp-4);text-align:center;}
+  .empty-note b{color:var(--ink);font-weight:500;}
+  .hint{font-size:11.5px;color:var(--ink-soft);margin-top:var(--sp-2);}
+  .footer-actions{display:flex;justify-content:flex-end;gap:var(--sp-2);margin-top:var(--sp-2);}
   .hidden{display:none !important;}
-  .spinner{display:inline-block;width:12px;height:12px;border:2px solid var(--border);border-top-color:var(--teal);border-radius:50%;animation:spin .7s linear infinite;}
+
+  .spinner{
+    display:inline-block;width:12px;height:12px;border:2px solid var(--border-strong);
+    border-top-color:var(--brand);border-radius:50%;animation:spin .7s linear infinite;
+  }
   @keyframes spin{to{transform:rotate(360deg);}}
 
-  .pdf-btn{background:var(--teal);color:#fff;border:none;font-size:11px;font-weight:600;padding:5px 10px;border-radius:5px;cursor:pointer;white-space:nowrap;}
-  .pdf-btn:hover{background:#00c4ae;}
-  .pdf-btn.ghost{background:transparent;border:1px solid var(--border);color:var(--text-dim);}
-  .pdf-btn.ghost:hover{border-color:var(--teal-dim);color:var(--text);background:transparent;}
-  .cell-actions{display:flex;gap:6px;align-items:center;}
-  .no-pdf{color:var(--text-dim);font-size:11px;}
-  .warn-panel{border-color:#E0A020;background:#FFFBF2;}
-  .flag{display:inline-block;font-size:10px;font-weight:600;color:#B26A00;border:1px solid #E0A020;border-radius:100px;padding:2px 7px;margin-left:6px;white-space:nowrap;}
-  .bar{height:4px;background:var(--surface-2);border-radius:100px;overflow:hidden;margin-top:6px;}
-  .bar > i{display:block;height:100%;background:var(--teal);width:0;transition:width .2s;}
-  .log-line{align-items:flex-start;}
-  .log-line .log-detail{display:block;color:var(--text-dim);font-weight:400;margin-top:3px;}
-  .review-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-family:'IBM Plex Mono',monospace;font-size:12px;padding:8px 0;border-bottom:1px solid var(--border);}
-  .review-row input{width:130px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:5px;padding:6px 8px;font-family:'IBM Plex Mono',monospace;font-size:12px;}
-  .review-row .grow{flex:1;min-width:150px;color:var(--text-dim);}
+  .pdf-btn{
+    background:var(--brand-fill);color:#FFFFFF;border:none;
+    font-family:'Fira Sans',sans-serif;font-size:11px;font-weight:500;
+    padding:5px 11px;border-radius:5px;cursor:pointer;white-space:nowrap;transition:background .15s;
+  }
+  .pdf-btn:hover{background:var(--brand-ink);}
+  .pdf-btn.ghost{background:transparent;border:1px solid var(--border-strong);color:var(--ink);}
+  .pdf-btn.ghost:hover{background:var(--surface-2);border-color:var(--brand);}
+  .cell-actions{display:flex;gap:var(--sp-1);align-items:center;}
+  .no-pdf{color:var(--ink-soft);font-size:11px;}
+
+  /* Marca de "revisar" como texto, no como emoji: un ⚑ lo leen distinto
+     cada lector de pantalla y cada sistema operativo. */
+  .flag{
+    display:inline-block;font-family:'Fira Code',ui-monospace,monospace;
+    font-size:10px;font-weight:500;color:var(--warn-ink);
+    border:1px solid var(--warn-border);background:var(--warn-wash);
+    border-radius:100px;padding:1px 7px;margin-left:var(--sp-1);white-space:nowrap;
+  }
+
+  .bar{height:4px;background:var(--border);border-radius:100px;overflow:hidden;margin-top:5px;}
+  .bar > i{display:block;height:100%;background:var(--brand);width:0;transition:width .2s;}
+
+  .review-row{
+    display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap;
+    font-family:'Fira Code',ui-monospace,monospace;font-size:12px;
+    padding:var(--sp-2) 0;border-bottom:1px solid var(--border);
+  }
+  .review-row input{width:140px;font-size:12px;padding:6px 9px;}
+  .review-row .grow{flex:1;min-width:150px;color:var(--ink-soft);}
+
+  .link-plain{color:var(--brand-ink);font-size:12.5px;text-decoration:underline;text-underline-offset:2px;}
+  .link-plain:hover{color:var(--ink);}
+
+  /* Pantalla de acceso: el logo es lo primero que se ve. */
+  #loginScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:var(--sp-5);}
+  .login-card{max-width:360px;width:100%;}
+  .login-card .brand-logo{height:40px;margin-bottom:var(--sp-5);}
+
+  @media (max-width:640px){
+    .wrap{padding:var(--sp-5) var(--sp-4) 64px;}
+    header{align-items:flex-start;}
+    h1{font-size:20px;}
+    .stats-strip{gap:var(--sp-4);}
+    .row{gap:var(--sp-2);}
+    .row > div:last-child, .row > div:last-child button{width:100%;}
+  }
 </style>
 </head>
 <body>
 
-<div id="loginScreen" style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;">
-  <div class="panel" style="max-width:340px;width:100%;">
-    <img src="/logo.png" alt="APROSS" style="height:32px;display:block;">
-    <div class="step-label" style="margin-top:14px;">Acceso</div>
+<div id="loginScreen">
+  <div class="panel login-card">
+    <img src="/logo.png" alt="APROSS" class="brand-logo">
+    <div class="step-label">Acceso</div>
     <h2>Repositorio de Boletas</h2>
     <p class="desc">Pedile la contraseña a quien administra esta herramienta.</p>
     <div class="field">
       <label for="passwordInput">Contraseña</label>
-      <input type="password" id="passwordInput" style="width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:10px 12px;font-family:'IBM Plex Mono',monospace;font-size:13.5px;">
+      <input type="password" id="passwordInput" autocomplete="current-password">
     </div>
-    <p id="loginError" class="hint" style="color:var(--red);"></p>
-    <button id="loginBtn" style="width:100%;margin-top:8px;">Entrar</button>
+    <p id="loginError" class="hint" style="color:var(--danger-ink);" role="alert"></p>
+    <button id="loginBtn" style="width:100%;margin-top:var(--sp-2);">Entrar</button>
   </div>
 </div>
 
@@ -128,8 +290,8 @@
 
   <header>
     <div>
-      <img src="/logo.png" alt="APROSS" style="height:32px;display:block;">
-      <h1 style="margin-top:12px;">Buscador de Boletas</h1>
+      <img src="/logo.png" alt="APROSS" class="brand-logo">
+      <h1>Buscador de Boletas</h1>
       <p class="subtitle" id="headerSubtitle">Escribí el número de afiliado y buscá si tiene una boleta cargada.</p>
     </div>
     <span class="badge" id="statusBadge">Cargando repositorio…</span>
@@ -156,12 +318,12 @@
   </div>
 
   <p style="text-align:center;margin:26px 0 0;">
-    <a href="#" id="adminToggle" style="color:var(--text-dim);font-size:12px;text-decoration:underline;">Modo administrador (cargar boletas)</a>
+    <a href="#" id="adminToggle" class="link-plain">Modo administrador (cargar boletas)</a>
   </p>
 
   <div id="adminPanels" class="hidden" style="margin-top:18px;">
 
-    <div class="panel" style="border-color:var(--teal-dim);">
+    <div class="panel" style="border-color:var(--brand);">
       <p class="hint" style="margin:0;">Este repositorio es <b>compartido de verdad</b> — guardado en una base de datos, no en el navegador. Cualquiera que abra este link ve las boletas que cargues acá.</p>
     </div>
 
@@ -196,7 +358,7 @@
     </div>
 
     <p style="text-align:center;">
-      <a href="#" id="adminToggleBack" style="color:var(--text-dim);font-size:12px;text-decoration:underline;">Volver al modo búsqueda</a>
+      <a href="#" id="adminToggleBack" class="link-plain">Volver al modo búsqueda</a>
     </p>
   </div>
 
@@ -495,7 +657,7 @@ async function renderRepo(){
     index = await apiGetIndex();
   }catch(e){
     statusBadge.textContent = 'No se pudo conectar al repositorio';
-    repoTableWrap.innerHTML = `<div class="repo-empty" style="color:var(--red);">${escapeHtml(e.message)}</div>`;
+    repoTableWrap.innerHTML = `<div class="repo-empty" style="color:var(--danger-ink);">${escapeHtml(e.message)}</div>`;
     return;
   }
 
@@ -505,7 +667,7 @@ async function renderRepo(){
     : 'Repositorio vacío';
 
   if (!index.length){
-    repoTableWrap.innerHTML = '<div class="repo-empty">Todavía no cargaste ningún lote.</div>';
+    repoTableWrap.innerHTML = '<div class="repo-empty">Todavía no cargaste ningún lote. Arrastrá un PDF de cupones o el Excel de Links de Pago al recuadro de abajo.</div>';
     repoStats.innerHTML = '';
     reviewPanel.classList.add('hidden');
     return;
@@ -526,7 +688,7 @@ async function renderRepo(){
             <td>${escapeHtml(e.cuenta || '—')}</td>
             <td>${e.rowCount}</td>
             <td>${e.fileType === 'pdf' ? (e.pdfCount || 0) : '—'}</td>
-            <td>${e.failedCount ? '<span style="color:var(--red)">' + e.failedCount + '</span>' : '0'}</td>
+            <td>${e.failedCount ? '<span style="color:var(--danger-ink)">' + e.failedCount + '</span>' : '0'}</td>
             <td>${new Date(e.uploadedAt).toLocaleString('es-AR')}</td>
             <td><button class="del-btn" data-id="${escapeHtml(e.id)}">Quitar</button></td>
           </tr>`).join('')}
@@ -618,7 +780,7 @@ async function runSearch(){
   const queries = queryBox.value.split(/[\n,;\s]+/).map(s => s.trim()).filter(Boolean);
 
   if (!queries.length){
-    resultsContainer.innerHTML = '<div class="empty-note">Ingresá al menos un número de afiliado.</div>';
+    resultsContainer.innerHTML = '<div class="empty-note">Escribí un número de afiliado para buscar. Podés pegar varios, uno por línea.</div>';
     resultsPanel.classList.remove('hidden');
     lastResults = [];
     return;
@@ -639,7 +801,7 @@ async function runSearch(){
     renderResults(data.results);
   }catch(e){
     resultsContainer.innerHTML =
-      `<div class="empty-note" style="color:var(--red);">Error al buscar: ${escapeHtml(e.message)}</div>`;
+      `<div class="empty-note" style="color:var(--danger-ink);">Error al buscar: ${escapeHtml(e.message)}</div>`;
   }
   resultsPanel.classList.remove('hidden');
   searchBtn.disabled = false;
@@ -665,7 +827,7 @@ function renderResults(blocks){
     if (!matches.length){
       const note = document.createElement('div');
       note.className = 'empty-note';
-      note.textContent = 'No aparece en ningún lote cargado en el repositorio.';
+      note.innerHTML = 'No aparece en ningún lote del repositorio. Verificá el número, o fijate en <b>Modo administrador</b> si falta cargar el lote de este período.';
       block.appendChild(note);
       resultsContainer.appendChild(block);
       return;
@@ -702,13 +864,19 @@ function renderResults(blocks){
       }
       tr.appendChild(acciones);
 
-      const celdas = [
-        (m.nombre || '—') + (m.revisar ? ' ⚑' : ''),
-        m.importe || '—',
-        m.vencimiento || '—',
-        m.periodo || '—'
-      ];
-      celdas.forEach(v => {
+      // el nombre va aparte porque puede llevar la marca de revisión
+      const tdNombre = document.createElement('td');
+      tdNombre.textContent = m.nombre || '—';
+      if (m.revisar){
+        const flag = document.createElement('span');
+        flag.className = 'flag';
+        flag.textContent = 'revisar';
+        flag.title = m.revisar;
+        tdNombre.appendChild(flag);
+      }
+      tr.appendChild(tdNombre);
+
+      [m.importe || '—', m.vencimiento || '—', m.periodo || '—'].forEach(v => {
         const td = document.createElement('td');
         td.textContent = v;
         tr.appendChild(td);

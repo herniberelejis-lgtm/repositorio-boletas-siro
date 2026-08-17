@@ -76,6 +76,41 @@ Las páginas se guardan agrupadas de a 25 en un mismo PDF justamente por
 esto: comparten las fuentes embebidas. De a una, la misma boleta ocupaba
 183 KB — 3,4 veces más.
 
+## Diseño
+
+La paleta sale del logo (`logo.png`): el verde `#00AB99` y el rojo `#FF2800`
+son los del archivo. El problema es que ese verde sobre blanco da **2,88:1**
+de contraste, así que no sirve ni como texto ni como fondo de un botón con
+texto blanco — no llega al 4,5:1 de WCAG AA. Por eso hay tres tokens:
+
+| Token | Color | Contraste | Para qué |
+| --- | --- | --- | --- |
+| `--brand` | `#00AB99` | — | identidad: logo, bordes, barras, acentos. Nunca texto. |
+| `--brand-ink` | `#00786B` | 5,4:1 | el verde cuando tiene que ser texto |
+| `--brand-fill` | `#008073` | 4,8:1 | fondo de botón con texto blanco, anillo de foco |
+| `--ink` | `#111418` | 18,5:1 | texto principal, negro neutro |
+| `--ink-soft` | `#5A6169` | 6,3:1 | texto secundario |
+| `--danger-ink` | `#C41E00` | 5,9:1 | texto de error |
+
+Los grises no tienen tinte verde a propósito: así el texto se lee sobrio y
+el verde funciona como acento en lugar de teñir toda la pantalla. Los 15
+pares de color que usa la interfaz pasan WCAG AA.
+
+Tipografía **Fira Sans** para la interfaz y **Fira Code** para datos (CPE,
+importes, tablas), que es donde alinear dígitos importa.
+
+El logo venía con fondo blanco opaco, que se veía como un recuadro sobre
+cualquier fondo que no fuera blanco. Está desmatado a transparencia: al
+recomponerlo sobre blanco da un resultado idéntico al original, píxel por
+píxel.
+
+Otras decisiones que vienen del checklist de accesibilidad: anillo de foco
+visible para navegación con teclado, `prefers-reduced-motion` respetado,
+"Encontrado / No encontrado" se distingue por la palabra y no sólo por el
+color, la marca de revisión es texto en lugar de un emoji, y las tablas
+scrollean dentro de su contenedor para que la página nunca scrollee en
+horizontal.
+
 ## Desarrollo
 
 ```
