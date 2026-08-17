@@ -14,19 +14,18 @@
 <script src="/siro-parse.js"></script>
 <style>
   /* --------------------------------------------------------------------
-     Paleta derivada del logo de APROSS.
+     Paleta de APROSS.
      --------------------------------------------------------------------
-     El verde (#00AB99) y el rojo (#FF2800) salen del propio logo.png. Pero
-     el verde de marca sobre blanco da 2,88:1 de contraste, así que no sirve
-     ni como texto ni como fondo de un botón con texto blanco: no llega al
-     4,5:1 que pide WCAG AA. Por eso hay tres tokens en lugar de uno.
+     Un solo verde, el exacto del logo.png: #00AB99. Antes había tres
+     variantes oscurecidas porque el verde de marca con texto BLANCO encima
+     da 2,88:1 y no llega al 4,5:1 de WCAG AA. La solución no era apagar el
+     verde sino cambiar lo que va encima: con texto NEGRO el mismo #00AB99
+     da 6,41:1. Así el verde queda idéntico al del logo y además la letra
+     es negra, que es como tiene que leerse.
 
-       --brand       identidad: logo, bordes, barras, acentos (nunca texto)
-       --brand-ink   el verde cuando tiene que ser texto      5,4:1
-       --brand-fill  fondo de botón con texto blanco encima   4,8:1
-
-     El texto es negro neutro y los grises no tienen tinte verde, para que
-     la lectura quede sobria y el verde se note como acento, no como tema.
+     El verde se usa siempre como relleno, borde o acento — nunca como
+     texto, porque en tamaño chico sobre blanco no contrasta. Todo el texto
+     es negro o gris neutro, sin tinte verde.
      -------------------------------------------------------------------- */
   :root{
     --bg:#F7F8F9; --surface:#FFFFFF; --surface-2:#F1F3F4;
@@ -35,9 +34,8 @@
     --ink:#111418;        /* 18,5:1 sobre blanco */
     --ink-soft:#5A6169;   /*  6,3:1 sobre blanco */
 
-    --brand:#00AB99;
-    --brand-ink:#00786B;
-    --brand-fill:#008073;
+    --brand:#00AB99;        /* el del logo, tal cual */
+    --brand-hover:#00C4AF;  /* mismo tono, un paso más claro */
     --brand-wash:#E8F7F5;
 
     --danger:#FF2800;
@@ -64,9 +62,9 @@
     -webkit-font-smoothing:antialiased;
   }
 
-  /* Un solo anillo de foco para todo, visible con teclado. Se usa
-     --brand-fill y no --brand porque el de marca no llega a 3:1. */
-  :focus-visible{ outline:2px solid var(--brand-fill); outline-offset:2px; border-radius:4px; }
+  /* Anillo de foco negro: el verde de marca sobre blanco no llega al 3:1
+     que hace falta para que se vea, y el negro además queda sobrio. */
+  :focus-visible{ outline:2px solid var(--ink); outline-offset:2px; border-radius:4px; }
 
   @media (prefers-reduced-motion: reduce){
     *{ animation-duration:.01ms !important; animation-iteration-count:1 !important;
@@ -102,11 +100,15 @@
   }
   .panel h2{font-size:15px;font-weight:600;margin:0 0 var(--sp-1);color:var(--ink);}
   .panel .desc{color:var(--ink-soft);font-size:12.5px;margin:0 0 var(--sp-4);}
+  /* La etiqueta va en gris con una barrita verde: el verde aporta la
+     marca como acento y el texto se lee en negro. */
   .step-label{
+    display:flex;align-items:center;gap:var(--sp-2);
     font-family:'Fira Code',ui-monospace,monospace;font-size:10.5px;
-    color:var(--brand-ink);letter-spacing:.09em;text-transform:uppercase;
-    font-weight:500;margin-bottom:var(--sp-1);
+    color:var(--ink-soft);letter-spacing:.09em;text-transform:uppercase;
+    font-weight:500;margin-bottom:var(--sp-2);
   }
+  .step-label::before{content:'';width:14px;height:2px;background:var(--brand);flex:none;}
 
   #dropzone{
     border:1.5px dashed var(--border-strong);border-radius:var(--radius);
@@ -128,7 +130,7 @@
   }
   .log-line b{color:var(--ink);font-weight:500;text-align:right;}
   .log-line.ok{border-left-color:var(--brand);}
-  .log-line.ok b{color:var(--brand-ink);}
+  .log-line.ok b{color:var(--ink);}
   .log-line.err{border-left-color:var(--danger);background:var(--danger-wash);}
   .log-line.err b{color:var(--danger-ink);}
   .log-line .log-detail{display:block;color:var(--ink-soft);font-weight:400;margin-top:3px;}
@@ -142,7 +144,7 @@
   td{color:var(--ink);}
   tbody tr:hover td{background:var(--surface-2);}
   .table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-  td.match-col{color:var(--brand-ink);font-weight:500;}
+  td.match-col{color:var(--ink);font-weight:600;}
 
   .repo-empty{color:var(--ink-soft);font-size:13px;padding:var(--sp-5) 0;text-align:center;}
   .del-btn{
@@ -167,16 +169,16 @@
     color:var(--ink);border-radius:6px;padding:9px 11px;
     font-family:'Fira Code',ui-monospace,monospace;font-size:13px;
   }
-  textarea:focus,input:focus{border-color:var(--brand-fill);}
+  textarea:focus,input:focus{border-color:var(--brand);}
   textarea{resize:vertical;min-height:76px;}
 
   button{
-    background:var(--brand-fill);color:#FFFFFF;border:none;
-    font-family:'Fira Sans',sans-serif;font-weight:500;font-size:13.5px;
+    background:var(--brand);color:var(--ink);border:none;
+    font-family:'Fira Sans',sans-serif;font-weight:600;font-size:13.5px;
     padding:9px 18px;border-radius:6px;cursor:pointer;transition:background .15s;
   }
-  button:hover{background:var(--brand-ink);}
-  button:disabled{background:var(--border-strong);color:#FFFFFF;cursor:not-allowed;}
+  button:hover{background:var(--brand-hover);}
+  button:disabled{background:var(--surface-2);color:var(--ink-soft);cursor:not-allowed;}
   button.secondary{background:transparent;border:1px solid var(--border-strong);color:var(--ink);}
   button.secondary:hover{background:var(--surface-2);border-color:var(--brand);}
   button.danger{background:transparent;border:1px solid var(--danger-ink);color:var(--danger-ink);}
@@ -192,8 +194,8 @@
     padding:4px 12px;border-radius:100px;letter-spacing:.05em;text-transform:uppercase;
     border:1px solid;
   }
-  .stamp.found{color:var(--brand-ink);border-color:var(--brand);background:var(--brand-wash);}
-  .stamp.notfound{color:var(--danger-ink);border-color:var(--danger);background:var(--danger-wash);}
+  .stamp.found{color:var(--ink);border-color:var(--brand);border-width:2px;background:var(--brand-wash);}
+  .stamp.notfound{color:var(--danger-ink);border-color:var(--danger);border-width:2px;background:var(--danger-wash);}
 
   .result-block{border:1px solid var(--border);border-radius:var(--radius);margin-bottom:var(--sp-3);overflow:hidden;}
   .result-block .rb-head{
@@ -205,8 +207,9 @@
   .rb-head .query{color:var(--ink);font-weight:600;}
   .rb-count{color:var(--ink-soft);}
 
-  td a{color:var(--brand-ink);text-decoration:underline;text-underline-offset:2px;}
-  td a:hover{color:var(--ink);}
+  td a{color:var(--ink);text-decoration:underline;text-decoration-color:var(--brand);
+       text-decoration-thickness:2px;text-underline-offset:3px;}
+  td a:hover{background:var(--brand-wash);}
 
   .empty-note{color:var(--ink-soft);font-size:12.5px;padding:var(--sp-4);text-align:center;}
   .empty-note b{color:var(--ink);font-weight:500;}
@@ -221,11 +224,11 @@
   @keyframes spin{to{transform:rotate(360deg);}}
 
   .pdf-btn{
-    background:var(--brand-fill);color:#FFFFFF;border:none;
-    font-family:'Fira Sans',sans-serif;font-size:11px;font-weight:500;
+    background:var(--brand);color:var(--ink);border:none;
+    font-family:'Fira Sans',sans-serif;font-size:11px;font-weight:600;
     padding:5px 11px;border-radius:5px;cursor:pointer;white-space:nowrap;transition:background .15s;
   }
-  .pdf-btn:hover{background:var(--brand-ink);}
+  .pdf-btn:hover{background:var(--brand-hover);}
   .pdf-btn.ghost{background:transparent;border:1px solid var(--border-strong);color:var(--ink);}
   .pdf-btn.ghost:hover{background:var(--surface-2);border-color:var(--brand);}
   .cell-actions{display:flex;gap:var(--sp-1);align-items:center;}
@@ -251,8 +254,9 @@
   .review-row input{width:140px;font-size:12px;padding:6px 9px;}
   .review-row .grow{flex:1;min-width:150px;color:var(--ink-soft);}
 
-  .link-plain{color:var(--brand-ink);font-size:12.5px;text-decoration:underline;text-underline-offset:2px;}
-  .link-plain:hover{color:var(--ink);}
+  .link-plain{color:var(--ink);font-size:12.5px;text-decoration:underline;
+              text-decoration-color:var(--brand);text-decoration-thickness:2px;text-underline-offset:3px;}
+  .link-plain:hover{background:var(--brand-wash);}
 
   /* Pantalla de acceso: el logo es lo primero que se ve. */
   #loginScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:var(--sp-5);}
@@ -746,7 +750,7 @@ async function renderEstado(){
     fila('Almacén Blob', e.blob.ok, e.blob.detalle) +
     fila('APP_PASSWORD', e.password.desdeEnv, e.password.detalle) +
     (e.listo
-      ? '<p class="hint" style="color:var(--brand-ink);">Todo conectado.</p>'
+      ? '<p class="hint" style="color:var(--ink);"><b>Todo conectado.</b></p>'
       : '<p class="hint">Lo que falta se configura en Vercel, en Storage y en Settings → Environment Variables. Después hay que redeployar.</p>');
 }
 
