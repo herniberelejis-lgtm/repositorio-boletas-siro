@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>APROSS · Buscador de Boletas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;500;600&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- pdf-lib parte el PDF de cupones en una boleta por página. Si no carga,
+     la app sigue funcionando y sólo guarda los links de pago. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="/siro-parse.js"></script>
+<style>
+  /* --------------------------------------------------------------------
+     Paleta derivada del logo de APROSS.
+     --------------------------------------------------------------------
+     El verde (#00AB99) y el rojo (#FF2800) salen del propio logo.png. Pero
+     el verde de marca sobre blanco da 2,88:1 de contraste, así que no sirve
+     ni como texto ni como fondo de un botón con texto blanco: no llega al
+     4,5:1 que pide WCAG AA. Por eso hay tres tokens en lugar de uno.
+
+       --brand       identidad: logo, bordes, barras, acentos (nunca texto)
+       --brand-ink   el verde cuando tiene que ser texto      5,4:1
+       --brand-fill  fondo de botón con texto blanco encima   4,8:1
+
+     El texto es negro neutro y los grises no tienen tinte verde, para que
+     la lectura quede sobria y el verde se note como acento, no como tema.
+     -------------------------------------------------------------------- */
+  :root{
+    --bg:#F7F8F9; --surface:#FFFFFF; --surface-2:#F1F3F4;
+    --border:#DFE3E6; --border-strong:#C6CDD1;
+
+    --ink:#111418;        /* 18,5:1 sobre blanco */
+    --ink-soft:#5A6169;   /*  6,3:1 sobre blanco */
+
+    --brand:#00AB99;
+    --brand-ink:#00786B;
+    --brand-fill:#008073;
+    --brand-wash:#E8F7F5;
+
+    --danger:#FF2800;
+    --danger-ink:#C41E00;
+    --danger-wash:#FFF1EE;
+
+    --warn-ink:#8A5200;
+    --warn-border:#E0A020;
+    --warn-wash:#FFF9EF;
+
+    --radius:8px;
+    --shadow:0 1px 2px rgba(17,20,24,.05), 0 1px 8px rgba(17,20,24,.04);
+
+    /* densidad de tablero: la herramienta es de datos, no de lectura */
+    --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px;
+  }
+
+  *{box-sizing:border-box;}
+
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:'Fira Sans',system-ui,-apple-system,sans-serif;
+    font-size:14px; line-height:1.5; min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* Un solo anillo de foco para todo, visible con teclado. Se usa
+     --brand-fill y no --brand porque el de marca no llega a 3:1. */
+  :focus-visible{ outline:2px solid var(--brand-fill); outline-offset:2px; border-radius:4px; }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation-duration:.01ms !important; animation-iteration-count:1 !important;
+       transition-duration:.01ms !important; }
+  }
+
+  .wrap{max-width:1180px;margin:0 auto;padding:var(--sp-6) var(--sp-5) 80px;}
+
+  header{
+    border-bottom:1px solid var(--border); padding-bottom:var(--sp-5);
+    margin-bottom:var(--sp-5); display:flex; justify-content:space-between;
+    align-items:flex-end; gap:var(--sp-4); flex-wrap:wrap;
+  }
+  .brand-logo{height:34px;width:auto;display:block;}
+  h1{font-size:24px;font-weight:600;margin:var(--sp-3) 0 var(--sp-1);letter-spacing:-0.01em;color:var(--ink);}
+  .subtitle{color:var(--ink-soft);font-size:13px;margin:0;max-width:560px;}
+
+  /* El badge de estado lleva un punto verde: el color acompaña, pero el
+     dato lo comunica el texto, que va en negro. */
+  .badge{
+    display:inline-flex;align-items:center;gap:var(--sp-2);
+    font-family:'Fira Code',ui-monospace,monospace;font-size:11.5px;
+    color:var(--ink);background:var(--surface);
+    border:1px solid var(--border);border-radius:100px;
+    padding:5px 12px;white-space:nowrap;
+  }
+  .badge::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--brand);flex:none;}
+
+  .panel{
+    background:var(--surface);border:1px solid var(--border);
+    border-radius:var(--radius);padding:var(--sp-5);margin-bottom:var(--sp-4);
+    box-shadow:var(--shadow);
+  }
+  .panel h2{font-size:15px;font-weight:600;margin:0 0 var(--sp-1);color:var(--ink);}
+  .panel .desc{color:var(--ink-soft);font-size:12.5px;margin:0 0 var(--sp-4);}
+  .step-label{
+    font-family:'Fira Code',ui-monospace,monospace;font-size:10.5px;
+    color:var(--brand-ink);letter-spacing:.09em;text-transform:uppercase;
+    font-weight:500;margin-bottom:var(--sp-1);
+  }
+
+  #dropzone{
+    border:1.5px dashed var(--border-strong);border-radius:var(--radius);
+    padding:var(--sp-6) var(--sp-4);text-align:center;cursor:pointer;
+    transition:border-color .18s,background .18s;
+  }
+  #dropzone:hover,#dropzone.drag{border-color:var(--brand);background:var(--brand-wash);}
+  #dropzone p{margin:0;color:var(--ink-soft);font-size:12.5px;}
+  #dropzone .main-cta{color:var(--ink);font-size:14px;font-weight:500;margin-bottom:var(--sp-1);}
+  #fileInput{display:none;}
+
+  #uploadLog{margin-top:var(--sp-4);display:flex;flex-direction:column;gap:var(--sp-2);}
+  .log-line{
+    font-family:'Fira Code',ui-monospace,monospace;font-size:12px;
+    display:flex;justify-content:space-between;align-items:flex-start;
+    gap:var(--sp-3);color:var(--ink-soft);
+    background:var(--surface-2);border-radius:6px;padding:var(--sp-2) var(--sp-3);
+    border-left:3px solid var(--border-strong);
+  }
+  .log-line b{color:var(--ink);font-weight:500;text-align:right;}
+  .log-line.ok{border-left-color:var(--brand);}
+  .log-line.ok b{color:var(--brand-ink);}
+  .log-line.err{border-left-color:var(--danger);background:var(--danger-wash);}
+  .log-line.err b{color:var(--danger-ink);}
+  .log-line .log-detail{display:block;color:var(--ink-soft);font-weight:400;margin-top:3px;}
+
+  table{width:100%;border-collapse:collapse;font-family:'Fira Code',ui-monospace,monospace;font-size:12px;}
+  th,td{padding:var(--sp-2) var(--sp-3);text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;}
+  th{
+    color:var(--ink-soft);font-weight:500;font-size:10px;text-transform:uppercase;
+    letter-spacing:.05em;background:var(--surface-2);
+  }
+  td{color:var(--ink);}
+  tbody tr:hover td{background:var(--surface-2);}
+  .table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  td.match-col{color:var(--brand-ink);font-weight:500;}
+
+  .repo-empty{color:var(--ink-soft);font-size:13px;padding:var(--sp-5) 0;text-align:center;}
+  .del-btn{
+    background:transparent;border:1px solid var(--border-strong);color:var(--danger-ink);
+    font-family:'Fira Sans',sans-serif;font-size:11px;font-weight:500;
+    padding:4px 10px;border-radius:5px;cursor:pointer;transition:border-color .15s,background .15s;
+  }
+  .del-btn:hover{border-color:var(--danger);background:var(--danger-wash);}
+
+  .stats-strip{
+    display:flex;gap:var(--sp-5);flex-wrap:wrap;
+    font-family:'Fira Code',ui-monospace,monospace;font-size:11.5px;color:var(--ink-soft);
+    margin-top:var(--sp-4);padding-top:var(--sp-4);border-top:1px solid var(--border);
+  }
+  .stats-strip b{color:var(--ink);font-size:15px;font-weight:600;display:block;}
+
+  .row{display:flex;gap:var(--sp-3);flex-wrap:wrap;align-items:flex-end;}
+  .field{flex:1;min-width:220px;}
+  label{display:block;font-size:12px;color:var(--ink-soft);margin-bottom:var(--sp-1);}
+  textarea,input[type=text],input[type=password]{
+    width:100%;background:var(--surface);border:1px solid var(--border-strong);
+    color:var(--ink);border-radius:6px;padding:9px 11px;
+    font-family:'Fira Code',ui-monospace,monospace;font-size:13px;
+  }
+  textarea:focus,input:focus{border-color:var(--brand-fill);}
+  textarea{resize:vertical;min-height:76px;}
+
+  button{
+    background:var(--brand-fill);color:#FFFFFF;border:none;
+    font-family:'Fira Sans',sans-serif;font-weight:500;font-size:13.5px;
+    padding:9px 18px;border-radius:6px;cursor:pointer;transition:background .15s;
+  }
+  button:hover{background:var(--brand-ink);}
+  button:disabled{background:var(--border-strong);color:#FFFFFF;cursor:not-allowed;}
+  button.secondary{background:transparent;border:1px solid var(--border-strong);color:var(--ink);}
+  button.secondary:hover{background:var(--surface-2);border-color:var(--brand);}
+  button.danger{background:transparent;border:1px solid var(--danger-ink);color:var(--danger-ink);}
+  button.danger:hover{background:var(--danger-wash);}
+
+  .results-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--sp-4);flex-wrap:wrap;gap:var(--sp-3);}
+
+  /* Encontrado / No encontrado: además del color, cambia la palabra y el
+     grosor del borde, para no depender sólo del color. */
+  .stamp{
+    display:inline-flex;align-items:center;gap:var(--sp-2);
+    font-family:'Fira Code',ui-monospace,monospace;font-size:11px;font-weight:600;
+    padding:4px 12px;border-radius:100px;letter-spacing:.05em;text-transform:uppercase;
+    border:1px solid;
+  }
+  .stamp.found{color:var(--brand-ink);border-color:var(--brand);background:var(--brand-wash);}
+  .stamp.notfound{color:var(--danger-ink);border-color:var(--danger);background:var(--danger-wash);}
+
+  .result-block{border:1px solid var(--border);border-radius:var(--radius);margin-bottom:var(--sp-3);overflow:hidden;}
+  .result-block .rb-head{
+    display:flex;justify-content:space-between;align-items:center;gap:var(--sp-3);
+    padding:var(--sp-3) var(--sp-4);background:var(--surface-2);
+    font-family:'Fira Code',ui-monospace,monospace;font-size:12px;
+    border-bottom:1px solid var(--border);flex-wrap:wrap;
+  }
+  .rb-head .query{color:var(--ink);font-weight:600;}
+  .rb-count{color:var(--ink-soft);}
+
+  td a{color:var(--brand-ink);text-decoration:underline;text-underline-offset:2px;}
+  td a:hover{color:var(--ink);}
+
+  .empty-note{color:var(--ink-soft);font-size:12.5px;padding:var(--sp-4);text-align:center;}
+  .empty-note b{color:var(--ink);font-weight:500;}
+  .hint{font-size:11.5px;color:var(--ink-soft);margin-top:var(--sp-2);}
+  .footer-actions{display:flex;justify-content:flex-end;gap:var(--sp-2);margin-top:var(--sp-2);}
+  .hidden{display:none !important;}
+
+  .spinner{
+    display:inline-block;width:12px;height:12px;border:2px solid var(--border-strong);
+    border-top-color:var(--brand);border-radius:50%;animation:spin .7s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  .pdf-btn{
+    background:var(--brand-fill);color:#FFFFFF;border:none;
+    font-family:'Fira Sans',sans-serif;font-size:11px;font-weight:500;
+    padding:5px 11px;border-radius:5px;cursor:pointer;white-space:nowrap;transition:background .15s;
+  }
+  .pdf-btn:hover{background:var(--brand-ink);}
+  .pdf-btn.ghost{background:transparent;border:1px solid var(--border-strong);color:var(--ink);}
+  .pdf-btn.ghost:hover{background:var(--surface-2);border-color:var(--brand);}
+  .cell-actions{display:flex;gap:var(--sp-1);align-items:center;}
+  .no-pdf{color:var(--ink-soft);font-size:11px;}
+
+  /* Marca de "revisar" como texto, no como emoji: un ⚑ lo leen distinto
+     cada lector de pantalla y cada sistema operativo. */
+  .flag{
+    display:inline-block;font-family:'Fira Code',ui-monospace,monospace;
+    font-size:10px;font-weight:500;color:var(--warn-ink);
+    border:1px solid var(--warn-border);background:var(--warn-wash);
+    border-radius:100px;padding:1px 7px;margin-left:var(--sp-1);white-space:nowrap;
+  }
+
+  .bar{height:4px;background:var(--border);border-radius:100px;overflow:hidden;margin-top:5px;}
+  .bar > i{display:block;height:100%;background:var(--brand);width:0;transition:width .2s;}
+
+  .review-row{
+    display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap;
+    font-family:'Fira Code',ui-monospace,monospace;font-size:12px;
+    padding:var(--sp-2) 0;border-bottom:1px solid var(--border);
+  }
+  .review-row input{width:140px;font-size:12px;padding:6px 9px;}
+  .review-row .grow{flex:1;min-width:150px;color:var(--ink-soft);}
+
+  .link-plain{color:var(--brand-ink);font-size:12.5px;text-decoration:underline;text-underline-offset:2px;}
+  .link-plain:hover{color:var(--ink);}
+
+  /* Pantalla de acceso: el logo es lo primero que se ve. */
+  #loginScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:var(--sp-5);}
+  .login-card{max-width:360px;width:100%;}
+  .login-card .brand-logo{height:40px;margin-bottom:var(--sp-5);}
+
+  @media (max-width:640px){
+    .wrap{padding:var(--sp-5) var(--sp-4) 64px;}
+    header{align-items:flex-start;}
+    h1{font-size:20px;}
+    .stats-strip{gap:var(--sp-4);}
+    .row{gap:var(--sp-2);}
+    .row > div:last-child, .row > div:last-child button{width:100%;}
+  }
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="panel login-card">
+    <img src="/logo.png" alt="APROSS" class="brand-logo">
+    <div class="step-label">Acceso</div>
+    <h2>Repositorio de Boletas</h2>
+    <p class="desc">Pedile la contraseña a quien administra esta herramienta.</p>
+    <div class="field">
+      <label for="passwordInput">Contraseña</label>
+      <input type="password" id="passwordInput" autocomplete="current-password">
+    </div>
+    <p id="loginError" class="hint" style="color:var(--danger-ink);" role="alert"></p>
+    <button id="loginBtn" style="width:100%;margin-top:var(--sp-2);">Entrar</button>
+  </div>
+</div>
+
+<div class="wrap hidden" id="mainApp">
+
+  <header>
+    <div>
+      <img src="/logo.png" alt="APROSS" class="brand-logo">
+      <h1>Buscador de Boletas</h1>
+      <p class="subtitle" id="headerSubtitle">Escribí el número de afiliado y buscá si tiene una boleta cargada.</p>
+    </div>
+    <span class="badge" id="statusBadge">Cargando repositorio…</span>
+  </header>
+
+  <div class="panel">
+    <div class="step-label">Búsqueda</div>
+    <h2>Buscar afiliado(s)</h2>
+    <div class="row">
+      <div class="field" style="flex:2">
+        <label for="queryBox">N° de afiliado — uno por línea o separados por coma. Podés pegar con o sin ceros a la izquierda, y también un CPE completo.</label>
+        <textarea id="queryBox" placeholder="3910284&#10;371852&#10;..."></textarea>
+      </div>
+      <div><button id="searchBtn">Buscar</button></div>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="resultsPanel">
+    <div class="results-head">
+      <h2 style="margin:0;">Resultados</h2>
+      <button class="secondary" id="exportBtn">Exportar coincidencias (CSV)</button>
+    </div>
+    <div id="resultsContainer"></div>
+  </div>
+
+  <p style="text-align:center;margin:26px 0 0;">
+    <a href="#" id="adminToggle" class="link-plain">Modo administrador (cargar boletas)</a>
+  </p>
+
+  <div id="adminPanels" class="hidden" style="margin-top:18px;">
+
+    <div class="panel" style="border-color:var(--brand);">
+      <p class="hint" style="margin:0;">Este repositorio es <b>compartido de verdad</b> — guardado en una base de datos, no en el navegador. Cualquiera que abra este link ve las boletas que cargues acá.</p>
+    </div>
+
+    <div class="panel">
+      <div class="step-label">Estado</div>
+      <h2>Configuración del proyecto</h2>
+      <p class="desc">Qué piezas están conectadas en Vercel. Si algo falta, la herramienta funciona igual pero recortada.</p>
+      <div id="estadoWrap"><div class="repo-empty"><span class="spinner"></span></div></div>
+    </div>
+
+    <div class="panel">
+      <div class="step-label">Repositorio</div>
+      <h2>Lotes cargados</h2>
+      <p class="desc">Queda guardado del lado del servidor. No hace falta recargar todo de nuevo cada vez.</p>
+      <div id="repoTableWrap"></div>
+      <div class="stats-strip" id="repoStats"></div>
+      <div class="footer-actions">
+        <button class="danger" id="clearRepoBtn">Vaciar repositorio</button>
+      </div>
+    </div>
+
+    <div class="panel hidden" id="reviewPanel">
+      <div class="step-label">Revisión</div>
+      <h2>Boletas sin afiliado</h2>
+      <p class="desc">El afiliado sale del CPE, que es determinístico, así que esto normalmente queda vacío. Si alguna fila aparece acá, cargá el número a mano.</p>
+      <div id="reviewWrap"></div>
+    </div>
+
+    <div class="panel">
+      <div class="step-label">Cargar</div>
+      <h2>Agregar lote(s) al repositorio</h2>
+      <p class="desc">Podés arrastrar varios archivos a la vez. Si un archivo ya estaba cargado (mismo nombre), lo reemplaza.</p>
+      <div id="dropzone">
+        <p class="main-cta">Arrastrá Excel de SIRO o PDF de cupones (uno o varios), o hacé clic para elegirlos</p>
+        <p>Acepta .xlsx / .xls (Links de Pago) y .pdf (Cupones). Los PDF se parten en una boleta por página y se guardan para poder descargarlas después</p>
+      </div>
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.pdf" multiple>
+      <div id="uploadLog"></div>
+    </div>
+
+    <p style="text-align:center;">
+      <a href="#" id="adminToggleBack" class="link-plain">Volver al modo búsqueda</a>
+    </p>
+  </div>
+
+</div>
+
+<script>
+'use strict';
+
+const S = window.SiroParse;
+
+const dropzone        = document.getElementById('dropzone');
+const fileInput       = document.getElementById('fileInput');
+const uploadLog       = document.getElementById('uploadLog');
+const statusBadge     = document.getElementById('statusBadge');
+const repoTableWrap   = document.getElementById('repoTableWrap');
+const repoStats       = document.getElementById('repoStats');
+const queryBox        = document.getElementById('queryBox');
+const resultsPanel    = document.getElementById('resultsPanel');
+const resultsContainer= document.getElementById('resultsContainer');
+const adminPanels     = document.getElementById('adminPanels');
+const adminToggle     = document.getElementById('adminToggle');
+const adminToggleBack = document.getElementById('adminToggleBack');
+const reviewPanel     = document.getElementById('reviewPanel');
+const reviewWrap      = document.getElementById('reviewWrap');
+const searchBtn       = document.getElementById('searchBtn');
+
+let lastResults = [];
+
+function escapeHtml(str){
+  return String(str ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ---- login ----------------------------------------------------------
+function getAppPassword(){ return sessionStorage.getItem('siro-app-pw') || ''; }
+function authHeaders(){ return { 'x-app-password': getAppPassword() }; }
+
+async function tryEnter(pw){
+  const errEl = document.getElementById('loginError');
+  errEl.textContent = '';
+  let r;
+  try{
+    r = await fetch('/api/lotes', { headers: { 'x-app-password': pw } });
+  }catch(e){
+    errEl.textContent = 'No se pudo conectar con el servidor.';
+    return;
+  }
+  if (r.status === 401){
+    errEl.textContent = 'Contraseña incorrecta.';
+    return;
+  }
+  sessionStorage.setItem('siro-app-pw', pw);
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('mainApp').classList.remove('hidden');
+  renderRepo();
+}
+
+document.getElementById('loginBtn').addEventListener('click', () => {
+  tryEnter(document.getElementById('passwordInput').value);
+});
+document.getElementById('passwordInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') tryEnter(document.getElementById('passwordInput').value);
+});
+if (getAppPassword()) tryEnter(getAppPassword());
+
+adminToggle.addEventListener('click', e => {
+  e.preventDefault();
+  adminPanels.classList.remove('hidden');
+  adminToggle.parentElement.classList.add('hidden');
+  renderRepo();
+  renderEstado();
+});
+adminToggleBack.addEventListener('click', e => {
+  e.preventDefault();
+  adminPanels.classList.add('hidden');
+  adminToggle.parentElement.classList.remove('hidden');
+});
+
+// ---- API ------------------------------------------------------------
+async function apiJson(url, opts){
+  const o = opts || {};
+  const r = await fetch(url, {
+    ...o,
+    headers: { ...(o.body ? {'Content-Type':'application/json'} : {}), ...authHeaders(), ...(o.headers||{}) }
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok){
+    const err = new Error(data.error || ('Error ' + r.status));
+    err.code = data.code;
+    throw err;
+  }
+  return data;
+}
+
+const apiGetIndex   = () => apiJson('/api/lotes').then(d => d.index || []);
+const apiAddLote    = p  => apiJson('/api/lotes', { method:'POST', body: JSON.stringify(p) });
+const apiDeleteLote = id => apiJson('/api/lote/' + encodeURIComponent(id), { method:'DELETE' });
+const apiClearRepo  = () => apiJson('/api/lotes', { method:'DELETE' });
+const apiSearch     = q  => apiJson('/api/search', { method:'POST', body: JSON.stringify({ queries:q }) });
+const apiPendientes = id => apiJson('/api/lote/' + encodeURIComponent(id)).then(d => d.rows || []);
+const apiCorregir   = (id, body) => apiJson('/api/lote/' + encodeURIComponent(id), { method:'PATCH', body: JSON.stringify(body) });
+
+// ---- lectura de archivos --------------------------------------------
+if (window.pdfjsLib){
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+
+async function extractPdfPagesText(buffer){
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  const pages = [];
+  for (let p = 1; p <= pdf.numPages; p++){
+    const content = await (await pdf.getPage(p)).getTextContent();
+    pages.push(content.items.map(it => it.str).join('\n'));
+  }
+  return pages;
+}
+
+function readSheetRows(buffer){
+  const wb = XLSX.read(new Uint8Array(buffer), { type:'array' });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(sheet, { header:1, defval:'', raw:false });
+}
+
+/**
+ * Sube las boletas de un PDF agrupadas en tandas.
+ *
+ * Van varias páginas por PDF en lugar de una: las páginas de un mismo
+ * archivo comparten las fuentes embebidas, y eso baja el peso de 183 KB a
+ * 53 KB por boleta (medido sobre un cupón real de 40 páginas). También
+ * entra en juego el límite de 4,5 MB del body de una función de Vercel, de
+ * ahí el tope de payload.
+ */
+const MAX_PAGINAS_POR_BLOB = 25;
+const MAX_PAYLOAD = 3200000;
+
+async function subirPaginas(buffer, loteId, rows, onProgress){
+  const src = await PDFLib.PDFDocument.load(buffer, { ignoreEncryption:true });
+  let guardadas = 0, hechas = 0;
+
+  async function subirGrupo(grupo){
+    const doc = await PDFLib.PDFDocument.create();
+    const paginas = await doc.copyPages(src, grupo.map(r => r.page - 1));
+    paginas.forEach(p => doc.addPage(p));
+    const b64 = await doc.saveAsBase64();
+
+    // si el grupo quedó muy pesado para un request, se parte al medio
+    if (b64.length > MAX_PAYLOAD && grupo.length > 1){
+      const mitad = Math.ceil(grupo.length / 2);
+      await subirGrupo(grupo.slice(0, mitad));
+      await subirGrupo(grupo.slice(mitad));
+      return;
+    }
+
+    const d = await apiJson('/api/boletas-pdf', {
+      method:'POST',
+      body: JSON.stringify({ loteId, chunk: { b64, pages: grupo.map(r => r.page) } })
+    });
+    guardadas += d.stored || 0;
+    hechas += grupo.length;
+    if (onProgress) onProgress(Math.round((hechas / rows.length) * 100));
+  }
+
+  for (let i = 0; i < rows.length; i += MAX_PAGINAS_POR_BLOB){
+    await subirGrupo(rows.slice(i, i + MAX_PAGINAS_POR_BLOB));
+  }
+  return guardadas;
+}
+
+// ---- carga de lotes --------------------------------------------------
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropzone.classList.remove('drag');
+  if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', e => { if (e.target.files.length) handleFiles(e.target.files); });
+
+function logLine(name){
+  const el = document.createElement('div');
+  el.className = 'log-line';
+  el.innerHTML = `<span>${escapeHtml(name)}</span><span><span class="spinner"></span></span>`;
+  uploadLog.prepend(el);
+  return {
+    progreso(txt, pct){
+      el.innerHTML = `<span>${escapeHtml(name)}</span><span style="min-width:190px">${escapeHtml(txt)}` +
+        (pct == null ? '' : `<span class="bar"><i style="width:${pct}%"></i></span>`) + `</span>`;
+    },
+    ok(txt, detalle){
+      el.className = 'log-line ok';
+      el.innerHTML = `<span>${escapeHtml(name)}</span><b>${escapeHtml(txt)}` +
+        (detalle ? `<span class="log-detail">${escapeHtml(detalle)}</span>` : '') + `</b>`;
+    },
+    error(txt){
+      el.className = 'log-line err';
+      el.innerHTML = `<span>${escapeHtml(name)}</span><b>${escapeHtml(txt)}</b>`;
+    }
+  };
+}
+
+async function handleFiles(fileList){
+  for (const file of Array.from(fileList)){
+    const log = logLine(file.name);
+    try{
+      const buffer = await file.arrayBuffer();
+      if (/\.pdf$/i.test(file.name)) await cargarPdf(file, buffer, log);
+      else await cargarExcel(file, buffer, log);
+    }catch(err){
+      log.error('Error: ' + err.message);
+    }
+  }
+  fileInput.value = '';
+  renderRepo();
+}
+
+async function cargarPdf(file, buffer, log){
+  log.progreso('Leyendo cupones…');
+  // pdf.js consume el ArrayBuffer, así que se le pasa una copia
+  const parsed = S.parseCupones(await extractPdfPagesText(buffer.slice(0)));
+
+  if (!parsed.rows.length){
+    log.error('No se reconoció ningún cupón en este PDF — se omitió');
+    return;
+  }
+
+  log.progreso('Guardando ' + parsed.rows.length + ' boletas…');
+  const alta = await apiAddLote({
+    filename: file.name,
+    convenio: parsed.convenio,
+    cuenta: parsed.cuenta,
+    cuentaSiro: parsed.cuenta,
+    periodo: parsed.periodo,
+    fileType: 'pdf',
+    rows: parsed.rows
+  });
+
+  let guardadas = 0, avisoPdf = '';
+  if (!window.PDFLib){
+    avisoPdf = 'no se pudo cargar pdf-lib, quedan sólo los links de pago';
+  } else {
+    try{
+      guardadas = await subirPaginas(buffer, alta.id, parsed.rows,
+        pct => log.progreso('Guardando PDF de cada boleta… ' + pct + '%', pct));
+    }catch(e){
+      avisoPdf = e.code === 'blob_no_configurado'
+        ? 'falta conectar un Blob store: quedan sólo los links de pago'
+        : 'no se pudieron guardar los PDF (' + e.message + ')';
+    }
+  }
+
+  const detalles = [];
+  if (parsed.periodo) detalles.push(parsed.periodo);
+  detalles.push(guardadas + ' con PDF descargable');
+  if (parsed.paginasOmitidas.length) detalles.push(parsed.paginasOmitidas.length + ' páginas sin cupón');
+  if (alta.failedCount) detalles.push(alta.failedCount + ' sin afiliado');
+  if (alta.reemplazo) detalles.push('reemplazó una carga anterior del mismo archivo');
+  if (avisoPdf) detalles.push(avisoPdf);
+
+  log.ok(parsed.rows.length + ' boletas', detalles.join(' · '));
+}
+
+async function cargarExcel(file, buffer, log){
+  log.progreso('Leyendo planilla…');
+  const parsed = S.parseLinksDePago(readSheetRows(buffer));
+
+  if (parsed.rows === null){
+    log.error('No tiene el formato esperado (falta la columna CPE) — se omitió');
+    return;
+  }
+  if (!parsed.rows.length){
+    log.error('Sin filas de datos — se omitió');
+    return;
+  }
+
+  const alta = await apiAddLote({
+    filename: file.name,
+    convenio: parsed.convenio,
+    cuenta: parsed.cuenta,
+    cuentaSiro: parsed.cuentaSiro,
+    periodo: '',
+    fileType: 'excel',
+    rows: parsed.rows
+  });
+
+  const detalles = ['sólo links de pago, el Excel no trae los PDF'];
+  if (alta.failedCount) detalles.push(alta.failedCount + ' sin afiliado');
+  if (alta.reemplazo) detalles.push('reemplazó una carga anterior del mismo archivo');
+
+  log.ok(parsed.rows.length + ' filas', detalles.join(' · '));
+}
+
+// ---- repositorio -----------------------------------------------------
+async function renderRepo(){
+  let index = [];
+  try{
+    index = await apiGetIndex();
+  }catch(e){
+    statusBadge.textContent = 'No se pudo conectar al repositorio';
+    repoTableWrap.innerHTML = `<div class="repo-empty" style="color:var(--danger-ink);">${escapeHtml(e.message)}</div>`;
+    return;
+  }
+
+  const totalRows = index.reduce((s,e) => s + (e.rowCount||0), 0);
+  statusBadge.textContent = index.length
+    ? totalRows + ' boletas en ' + index.length + ' lote' + (index.length===1?'':'s')
+    : 'Repositorio vacío';
+
+  if (!index.length){
+    repoTableWrap.innerHTML = '<div class="repo-empty">Todavía no cargaste ningún lote. Arrastrá un PDF de cupones o el Excel de Links de Pago al recuadro de abajo.</div>';
+    repoStats.innerHTML = '';
+    reviewPanel.classList.add('hidden');
+    return;
+  }
+
+  const sorted = [...index].sort((a,b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+  repoTableWrap.innerHTML = `
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Archivo</th><th>Tipo</th><th>Periodo</th><th>Convenio</th><th>Cuenta</th>
+          <th>Boletas</th><th>Con PDF</th><th>Sin afiliado</th><th>Cargado</th><th></th></tr></thead>
+        <tbody>${sorted.map(e => `
+          <tr>
+            <td>${escapeHtml(e.filename)}</td>
+            <td>${e.fileType === 'pdf' ? 'PDF cupones' : 'Excel SIRO'}</td>
+            <td>${escapeHtml(e.periodo || '—')}</td>
+            <td>${escapeHtml(e.convenio || '—')}</td>
+            <td>${escapeHtml(e.cuenta || '—')}</td>
+            <td>${e.rowCount}</td>
+            <td>${e.fileType === 'pdf' ? (e.pdfCount || 0) : '—'}</td>
+            <td>${e.failedCount ? '<span style="color:var(--danger-ink)">' + e.failedCount + '</span>' : '0'}</td>
+            <td>${new Date(e.uploadedAt).toLocaleString('es-AR')}</td>
+            <td><button class="del-btn" data-id="${escapeHtml(e.id)}">Quitar</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+
+  const totalPdf    = index.reduce((s,e) => s + (e.pdfCount||0), 0);
+  const totalFailed = index.reduce((s,e) => s + (e.failedCount||0), 0);
+  repoStats.innerHTML =
+    `<span><b>${totalRows}</b> boletas totales</span>` +
+    `<span><b>${index.length}</b> lotes</span>` +
+    `<span><b>${totalPdf}</b> con PDF descargable</span>` +
+    `<span><b>${totalFailed}</b> sin afiliado</span>`;
+
+  repoTableWrap.querySelectorAll('.del-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try{ await apiDeleteLote(btn.dataset.id); }
+      catch(e){ alert('No se pudo borrar: ' + e.message); }
+      renderRepo();
+    });
+  });
+
+  renderRevision(index.filter(e => e.failedCount > 0));
+}
+
+async function renderEstado(){
+  const wrap = document.getElementById('estadoWrap');
+  let e;
+  try{
+    e = await apiJson('/api/estado');
+  }catch(err){
+    wrap.innerHTML = `<div class="repo-empty" style="color:var(--danger-ink);">No se pudo leer el estado: ${escapeHtml(err.message)}</div>`;
+    return;
+  }
+
+  const fila = (nombre, ok, detalle) => `
+    <div class="review-row">
+      <span class="stamp ${ok ? 'found' : 'notfound'}">${ok ? 'OK' : 'Falta'}</span>
+      <span style="min-width:130px">${escapeHtml(nombre)}</span>
+      <span class="grow">${escapeHtml(detalle)}</span>
+    </div>`;
+
+  wrap.innerHTML =
+    fila('Base KV', e.kv.ok, e.kv.detalle) +
+    fila('Almacén Blob', e.blob.ok, e.blob.detalle) +
+    fila('APP_PASSWORD', e.password.desdeEnv, e.password.detalle) +
+    (e.listo
+      ? '<p class="hint" style="color:var(--brand-ink);">Todo conectado.</p>'
+      : '<p class="hint">Lo que falta se configura en Vercel, en Storage y en Settings → Environment Variables. Después hay que redeployar.</p>');
+}
+
+async function renderRevision(lotesConFallas){
+  if (!lotesConFallas.length){ reviewPanel.classList.add('hidden'); return; }
+  reviewPanel.classList.remove('hidden');
+  reviewWrap.innerHTML = '<div class="repo-empty"><span class="spinner"></span></div>';
+
+  const bloques = [];
+  for (const lote of lotesConFallas){
+    let pendientes = [];
+    try{ pendientes = await apiPendientes(lote.id); }catch(e){ continue; }
+    if (!pendientes.length) continue;
+    bloques.push({ lote, pendientes });
+  }
+
+  if (!bloques.length){ reviewPanel.classList.add('hidden'); return; }
+
+  reviewWrap.innerHTML = bloques.map(({lote, pendientes}) => `
+    <div style="margin-bottom:16px;">
+      <div class="step-label">${escapeHtml(lote.filename)}</div>
+      ${pendientes.map(r => `
+        <div class="review-row" data-lote="${escapeHtml(lote.id)}" data-cpe="${escapeHtml(r.cpe)}">
+          <span>CPE ${escapeHtml(r.cpe)}</span>
+          <span class="grow">${escapeHtml(r.nombre || 'sin nombre')}${r.revisar ? ' · ' + escapeHtml(r.revisar) : ''}</span>
+          <input type="text" placeholder="N° afiliado" inputmode="numeric">
+          <button class="pdf-btn">Guardar</button>
+        </div>`).join('')}
+    </div>`).join('');
+
+  reviewWrap.querySelectorAll('.review-row').forEach(row => {
+    const input = row.querySelector('input');
+    const btn   = row.querySelector('button');
+    const guardar = async () => {
+      const val = input.value.trim();
+      if (!val) return;
+      btn.disabled = true;
+      try{
+        await apiCorregir(row.dataset.lote, { cpe: row.dataset.cpe, afiliado: val });
+        row.innerHTML = '<span style="color:var(--green)">Guardado: afiliado ' + escapeHtml(S.normalizeAfiliado(val)) + '</span>';
+      }catch(e){
+        btn.disabled = false;
+        alert('No se pudo guardar: ' + e.message);
+      }
+    };
+    btn.addEventListener('click', guardar);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') guardar(); });
+  });
+}
+
+document.getElementById('clearRepoBtn').addEventListener('click', async () => {
+  if (!confirm('¿Vaciar todo el repositorio? Borra todos los lotes y los PDF guardados.')) return;
+  try{ await apiClearRepo(); }
+  catch(e){ alert('No se pudo vaciar: ' + e.message); }
+  renderRepo();
+});
+
+// ---- búsqueda --------------------------------------------------------
+searchBtn.addEventListener('click', runSearch);
+queryBox.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) runSearch();
+});
+
+async function runSearch(){
+  const queries = queryBox.value.split(/[\n,;\s]+/).map(s => s.trim()).filter(Boolean);
+
+  if (!queries.length){
+    resultsContainer.innerHTML = '<div class="empty-note">Escribí un número de afiliado para buscar. Podés pegar varios, uno por línea.</div>';
+    resultsPanel.classList.remove('hidden');
+    lastResults = [];
+    return;
+  }
+
+  searchBtn.disabled = true;
+  searchBtn.textContent = 'Buscando…';
+  try{
+    const data = await apiSearch(queries);
+    lastResults = [];
+    data.results.forEach(({query, matches}) => {
+      matches.forEach(m => lastResults.push({
+        afiliado_buscado: query, afiliado: m.afiliado, nombre: m.nombre,
+        importe: m.importe, vencimiento: m.vencimiento, periodo: m.periodo,
+        convenio: m.convenio, cpe: m.cpe, lote: m.filename, link: m.link
+      }));
+    });
+    renderResults(data.results);
+  }catch(e){
+    resultsContainer.innerHTML =
+      `<div class="empty-note" style="color:var(--danger-ink);">Error al buscar: ${escapeHtml(e.message)}</div>`;
+  }
+  resultsPanel.classList.remove('hidden');
+  searchBtn.disabled = false;
+  searchBtn.textContent = 'Buscar';
+}
+
+function renderResults(blocks){
+  resultsContainer.innerHTML = '';
+
+  blocks.forEach(({query, ingresado, comoCpe, matches}) => {
+    const block = document.createElement('div');
+    block.className = 'result-block';
+
+    const head = document.createElement('div');
+    head.className = 'rb-head';
+    head.innerHTML =
+      `<span><span class="query">Afiliado ${escapeHtml(query)}</span> ` +
+      `<span class="rb-count">— ${matches.length} boleta${matches.length===1?'':'s'}` +
+      (comoCpe ? ' · buscado por CPE ' + escapeHtml(ingresado) : '') + `</span></span>` +
+      `<span class="stamp ${matches.length ? 'found':'notfound'}">${matches.length ? 'Encontrado' : 'No encontrado'}</span>`;
+    block.appendChild(head);
+
+    if (!matches.length){
+      const note = document.createElement('div');
+      note.className = 'empty-note';
+      note.innerHTML = 'No aparece en ningún lote del repositorio. Verificá el número, o fijate en <b>Modo administrador</b> si falta cargar el lote de este período.';
+      block.appendChild(note);
+      resultsContainer.appendChild(block);
+      return;
+    }
+
+    const scroll = document.createElement('div');
+    scroll.className = 'table-scroll';
+    const table = document.createElement('table');
+    table.innerHTML =
+      '<thead><tr><th>Boleta</th><th>Nombre</th><th>Importe</th><th>Vencimiento</th>' +
+      '<th>Periodo</th><th>CPE</th><th>Lote</th><th>Link de pago</th></tr></thead>';
+
+    const tbody = document.createElement('tbody');
+    matches.forEach(m => {
+      const tr = document.createElement('tr');
+
+      const acciones = document.createElement('td');
+      acciones.className = 'cell-actions';
+      if (m.hasPdf){
+        const ver = document.createElement('button');
+        ver.className = 'pdf-btn';
+        ver.textContent = 'Ver PDF';
+        ver.addEventListener('click', () => abrirBoleta(m, false, ver));
+        const baj = document.createElement('button');
+        baj.className = 'pdf-btn ghost';
+        baj.textContent = 'Descargar';
+        baj.addEventListener('click', () => abrirBoleta(m, true, baj));
+        acciones.append(ver, baj);
+      } else {
+        const s = document.createElement('span');
+        s.className = 'no-pdf';
+        s.textContent = m.fileType === 'pdf' ? 'PDF no guardado' : 'sólo link';
+        acciones.appendChild(s);
+      }
+      tr.appendChild(acciones);
+
+      // el nombre va aparte porque puede llevar la marca de revisión
+      const tdNombre = document.createElement('td');
+      tdNombre.textContent = m.nombre || '—';
+      if (m.revisar){
+        const flag = document.createElement('span');
+        flag.className = 'flag';
+        flag.textContent = 'revisar';
+        flag.title = m.revisar;
+        tdNombre.appendChild(flag);
+      }
+      tr.appendChild(tdNombre);
+
+      [m.importe || '—', m.vencimiento || '—', m.periodo || '—'].forEach(v => {
+        const td = document.createElement('td');
+        td.textContent = v;
+        tr.appendChild(td);
+      });
+
+      const tdCpe = document.createElement('td');
+      tdCpe.className = 'match-col';
+      tdCpe.textContent = m.cpe;
+      tr.appendChild(tdCpe);
+
+      const tdLote = document.createElement('td');
+      tdLote.textContent = m.filename;
+      tr.appendChild(tdLote);
+
+      const tdLink = document.createElement('td');
+      const a = document.createElement('a');
+      a.href = m.link; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = 'Pagar en SIRO';
+      tdLink.appendChild(a);
+      tr.appendChild(tdLink);
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    scroll.appendChild(table);
+    block.appendChild(scroll);
+    resultsContainer.appendChild(block);
+  });
+}
+
+/**
+ * Trae el PDF de la boleta. Va por /api/boleta con la contraseña en el
+ * header en lugar de linkear el blob, que es público.
+ *
+ * La pestaña se abre antes del await: si se abriera después, el navegador
+ * la trata como popup y la bloquea.
+ */
+async function abrirBoleta(m, descargar, btn){
+  const ventana = descargar ? null : window.open('', '_blank');
+  const textoOriginal = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '…';
+  try{
+    const r = await fetch('/api/boleta?lote=' + encodeURIComponent(m.loteId) + '&page=' + m.page,
+                          { headers: authHeaders() });
+    if (!r.ok){
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.error || ('Error ' + r.status));
+    }
+    const url = URL.createObjectURL(await r.blob());
+    if (descargar){
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'boleta-' + m.afiliado + (m.vencimiento ? '-' + m.vencimiento.replace(/\//g,'-') : '') + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } else if (ventana){
+      ventana.location = url;
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }catch(e){
+    if (ventana) ventana.close();
+    alert('No se pudo abrir la boleta: ' + e.message);
+  }
+  btn.disabled = false;
+  btn.textContent = textoOriginal;
+}
+
+document.getElementById('exportBtn').addEventListener('click', () => {
+  if (!lastResults.length){ alert('No hay resultados para exportar.'); return; }
+  const ws = XLSX.utils.json_to_sheet(lastResults);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Coincidencias');
+  XLSX.writeFile(wb, 'coincidencias_repositorio_siro.csv');
+});
+</script>
+</body>
+</html>

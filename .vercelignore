@@ -1,0 +1,6 @@
+# Sólo sirve para el deploy: los tests y las herramientas de línea de
+# comandos no hacen falta en Vercel. siro-parse.js NO va acá — lo requieren
+# los endpoints de api/ y lo carga index.html.
+node_modules
+test
+scripts
