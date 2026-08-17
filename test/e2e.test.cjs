@@ -139,6 +139,14 @@ test('circuito completo: cargar un PDF de cupones, buscar y bajar la boleta',
     fs.writeFileSync(pdfPath, pdfBuf);
 
     await page.click('#adminToggle');
+
+    // el panel de estado reporta la configuración del proyecto
+    await page.waitForSelector('#estadoWrap .review-row');
+    const estado = await page.textContent('#estadoWrap');
+    assert.match(estado, /Base KV/);
+    assert.match(estado, /Almacén Blob/);
+    assert.match(estado, /APP_PASSWORD/);
+
     await page.setInputFiles('#fileInput', pdfPath);
 
     await page.waitForSelector('#uploadLog .log-line.ok', { timeout: 60000 });

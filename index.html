@@ -328,6 +328,13 @@
     </div>
 
     <div class="panel">
+      <div class="step-label">Estado</div>
+      <h2>Configuración del proyecto</h2>
+      <p class="desc">Qué piezas están conectadas en Vercel. Si algo falta, la herramienta funciona igual pero recortada.</p>
+      <div id="estadoWrap"><div class="repo-empty"><span class="spinner"></span></div></div>
+    </div>
+
+    <div class="panel">
       <div class="step-label">Repositorio</div>
       <h2>Lotes cargados</h2>
       <p class="desc">Queda guardado del lado del servidor. No hace falta recargar todo de nuevo cada vez.</p>
@@ -428,6 +435,7 @@ adminToggle.addEventListener('click', e => {
   adminPanels.classList.remove('hidden');
   adminToggle.parentElement.classList.add('hidden');
   renderRepo();
+  renderEstado();
 });
 adminToggleBack.addEventListener('click', e => {
   e.preventDefault();
@@ -714,6 +722,32 @@ async function renderRepo(){
   });
 
   renderRevision(index.filter(e => e.failedCount > 0));
+}
+
+async function renderEstado(){
+  const wrap = document.getElementById('estadoWrap');
+  let e;
+  try{
+    e = await apiJson('/api/estado');
+  }catch(err){
+    wrap.innerHTML = `<div class="repo-empty" style="color:var(--danger-ink);">No se pudo leer el estado: ${escapeHtml(err.message)}</div>`;
+    return;
+  }
+
+  const fila = (nombre, ok, detalle) => `
+    <div class="review-row">
+      <span class="stamp ${ok ? 'found' : 'notfound'}">${ok ? 'OK' : 'Falta'}</span>
+      <span style="min-width:130px">${escapeHtml(nombre)}</span>
+      <span class="grow">${escapeHtml(detalle)}</span>
+    </div>`;
+
+  wrap.innerHTML =
+    fila('Base KV', e.kv.ok, e.kv.detalle) +
+    fila('Almacén Blob', e.blob.ok, e.blob.detalle) +
+    fila('APP_PASSWORD', e.password.desdeEnv, e.password.detalle) +
+    (e.listo
+      ? '<p class="hint" style="color:var(--brand-ink);">Todo conectado.</p>'
+      : '<p class="hint">Lo que falta se configura en Vercel, en Storage y en Settings → Environment Variables. Después hay que redeployar.</p>');
 }
 
 async function renderRevision(lotesConFallas){

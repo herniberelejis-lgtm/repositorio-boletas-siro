@@ -67,6 +67,10 @@ se puede saber cuál es cuál.
    contraseña de acceso. Si no se define queda la que estaba hardcodeada
    (`Apross2026`), así que conviene configurarla y redeployar.
 
+Para confirmar que las tres cosas quedaron conectadas, entrar en **Modo
+administrador**: el panel *Configuración del proyecto* dice cuál falta. Lo
+mismo responde `GET /api/estado` (pide la contraseña, no devuelve secretos).
+
 ### Cuánto ocupa
 
 Cada boleta pesa unos **55 KB** en Blob. Mil boletas por mes son ~55 MB
@@ -144,6 +148,7 @@ el identificador impreso coincide con el del CPE.
 | `api/boletas-pdf.js` | Guarda las páginas del PDF en Blob por tandas. |
 | `api/boleta.js` | Devuelve el PDF de una boleta, extrayendo su página del blob. |
 | `api/search.js` | Búsqueda por afiliado (o por CPE completo) contra todos los lotes. |
+| `api/estado.js` | Diagnóstico: qué está conectado (KV, Blob, `APP_PASSWORD`). |
 | `api/_lib.js` | KV, autenticación y proyecciones compartidas. |
 | `test/` | Pruebas de parseo y end-to-end, más el servidor local. |
 | `scripts/verificar.cjs` | Revisa archivos de SIRO desde la línea de comandos. |

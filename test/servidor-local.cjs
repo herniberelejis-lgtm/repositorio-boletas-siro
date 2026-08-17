@@ -65,7 +65,8 @@ const handlers = {
   '/api/lotes': require('../api/lotes.js'),
   '/api/search': require('../api/search.js'),
   '/api/boleta': require('../api/boleta.js'),
-  '/api/boletas-pdf': require('../api/boletas-pdf.js')
+  '/api/boletas-pdf': require('../api/boletas-pdf.js'),
+  '/api/estado': require('../api/estado.js')
 };
 const handlerLote = require('../api/lote/[id].js');
 
