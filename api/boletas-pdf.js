@@ -55,10 +55,14 @@ module.exports = async (req, res) => {
     const primera = chunk.pages[0];
     const ultima = chunk.pages[chunk.pages.length - 1];
 
-    const { url } = await put(
+    // El store del proyecto quedó creado en modo privado (es la opción que
+    // ofrece Vercel por defecto), así que 'public' devuelve error. En
+    // modo privado igual funciona: /api/boleta lee con @vercel/blob's
+    // get(), que sabe autenticar, en vez de un fetch() directo a la URL.
+    const { url, pathname } = await put(
       'siro/' + loteId + '/p' + primera + '-' + ultima + '.pdf',
       Buffer.from(chunk.b64, 'base64'),
-      { access: 'public', contentType: 'application/pdf', addRandomSuffix: true }
+      { access: 'private', contentType: 'application/pdf', addRandomSuffix: true }
     );
 
     let stored = 0;
@@ -66,7 +70,7 @@ module.exports = async (req, res) => {
       const j = rows.findIndex((r) => r.page === page);
       if (j === -1) return;
       // pageInBlob es 1-based, igual que page
-      rows[j] = { ...rows[j], blobUrl: url, pageInBlob: i + 1 };
+      rows[j] = { ...rows[j], blobUrl: url, blobPathname: pathname, pageInBlob: i + 1 };
       stored++;
     });
 
