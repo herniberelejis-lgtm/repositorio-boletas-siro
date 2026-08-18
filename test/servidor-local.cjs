@@ -38,26 +38,43 @@ class FakeRedis {
 }
 
 // ---- Blob en memoria -------------------------------------------------
-// Los blobs se sirven por HTTP para que el fetch() de api/boleta.js ande
-// igual que contra el Blob real.
+// El store real del proyecto quedó privado (es lo que ofrece Vercel por
+// defecto), así que este mock rechaza 'public' con el mismo mensaje que
+// tira Vercel — así un test agarra en el momento si algún código vuelve a
+// pedir acceso público por error.
 //
 // Los endpoints miran BLOB_READ_WRITE_TOKEN para saber si hay un store
 // conectado; acá hay uno (en memoria), así que se declara.
 process.env.BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || 'fake-local';
+
+function exigirAccesoPrivado(opts) {
+  if (!opts || opts.access !== 'private') {
+    throw new Error(
+      "Vercel Blob: Cannot use " + ((opts && opts.access) || 'public') +
+      ' access on a private store. The store is configured with private access.'
+    );
+  }
+}
+
 const blobs = new Map();
-let baseUrl = '';
 const fakeBlob = {
   async put(pathname, body, opts) {
-    const key = (opts && opts.addRandomSuffix)
-      ? pathname.replace(/\.pdf$/, '') + '-' + Math.random().toString(36).slice(2, 8) + '.pdf'
-      : pathname;
+    exigirAccesoPrivado(opts);
+    const suffix = (opts && opts.addRandomSuffix) ? '-' + Math.random().toString(36).slice(2, 8) : '';
+    const key = pathname.replace(/(\.[^./]+)?$/, suffix + '$1');
     blobs.set(key, Buffer.from(body));
-    return { url: baseUrl + '/_blob/' + key, pathname: key };
+    return { url: 'https://fake-blob.local/' + key, pathname: key };
   },
-  async del(urls) {
-    for (const u of [].concat(urls)) {
-      const i = u.indexOf('/_blob/');
-      if (i !== -1) blobs.delete(u.slice(i + '/_blob/'.length));
+  async get(pathname, opts) {
+    exigirAccesoPrivado(opts);
+    const buf = blobs.get(pathname);
+    if (!buf) return null;
+    return { statusCode: 200, blob: { contentType: 'application/pdf' }, stream: new Response(buf).body };
+  },
+  async del(urlsOrPathnames) {
+    for (const u of [].concat(urlsOrPathnames)) {
+      const key = u.startsWith('https://fake-blob.local/') ? u.slice('https://fake-blob.local/'.length) : u;
+      blobs.delete(key);
     }
   }
 };
@@ -126,13 +143,6 @@ async function manejar(req, res) {
   const ruta = url.pathname;
 
   try {
-    if (ruta.startsWith('/_blob/')) {
-      const buf = blobs.get(decodeURIComponent(ruta.slice('/_blob/'.length)));
-      if (!buf) { res.writeHead(404); return res.end('no existe'); }
-      res.writeHead(200, { 'Content-Type': 'application/pdf' });
-      return res.end(buf);
-    }
-
     if (ruta.startsWith('/api/')) {
       req.query = Object.fromEntries(url.searchParams);
       if (req.method !== 'GET' && req.method !== 'DELETE') {

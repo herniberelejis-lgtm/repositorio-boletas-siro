@@ -41,9 +41,11 @@ module.exports = async (req, res) => {
   if (blobConfigurado()) {
     try {
       const { put, del } = require('@vercel/blob');
+      // El store del proyecto es privado; 'public' tira error acá igual
+      // que en la carga real.
       const { url } = await put(
         'siro/_healthcheck/' + Date.now() + '.txt', 'ok',
-        { access: 'public', contentType: 'text/plain', addRandomSuffix: true }
+        { access: 'private', contentType: 'text/plain', addRandomSuffix: true }
       );
       await del(url);
       estado.blob.ok = true;

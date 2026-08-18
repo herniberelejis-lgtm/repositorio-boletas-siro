@@ -168,9 +168,12 @@ el identificador impreso coincide con el del CPE.
 | `test/` | Pruebas de parseo y end-to-end, más el servidor local. |
 | `scripts/verificar.cjs` | Revisa archivos de SIRO desde la línea de comandos. |
 
-Las URL de Vercel Blob son públicas, así que nunca se le mandan al
-navegador: los PDF salen por `/api/boleta`, que pide la contraseña igual
-que el resto de los endpoints.
+El store de Blob del proyecto quedó privado (es la opción que da Vercel
+por defecto al crearlo desde Storage), así que ni siquiera el propio
+servidor puede leer una URL de blob con un `fetch()` común — hace falta
+`get()` de `@vercel/blob`, que arma la autenticación. Tampoco se le manda
+nunca la URL cruda al navegador: los PDF salen por `/api/boleta`, que pide
+la contraseña igual que el resto de los endpoints.
 
 ## Límites conocidos
 
