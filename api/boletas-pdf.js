@@ -16,7 +16,7 @@
  *
  *   POST { loteId, chunk: { b64, pages: [nroDePaginaEnElPdfOriginal, ...] } }
  */
-const { requireAuth, getIndex, setIndex, getRows, setRows, countPdf } = require('./_lib');
+const { requireAuth, getIndex, setIndex, getRows, setRows, countPdf, blobConfigurado } = require('./_lib');
 
 // Sin Blob conectado no hay dónde guardar los PDF. Se devuelve este código
 // para que el frontend avise y el lote siga andando en modo link solamente.
@@ -37,7 +37,7 @@ module.exports = async (req, res) => {
       return;
     }
 
-    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    if (!blobConfigurado()) {
       res.status(503).json({
         error: 'No hay un Blob store conectado al proyecto',
         code: SIN_BLOB
