@@ -55,6 +55,11 @@ se puede saber cuál es cuál.
   el link de pago.
 - **Si se vuelve a cargar un archivo con el mismo nombre, reemplaza al
   anterior** y borra sus PDF, para no duplicar.
+- **Si un lote de PDF queda con menos "Con PDF" que "Boletas"**, algún
+  chunk no se guardó — por ejemplo si el deploy cambió de versión a mitad
+  de una carga grande. Esos lotes se marcan "incompleto" en la tabla, y el
+  botón *Quitar lotes con PDF incompleto* los borra todos de una para
+  volver a cargar los mismos archivos.
 
 ## Puesta en marcha en Vercel
 
