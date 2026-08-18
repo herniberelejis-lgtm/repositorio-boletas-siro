@@ -63,6 +63,13 @@ se puede saber cuál es cuál.
 2. **Vercel Blob** (Storage → Create → Blob → Connect to Project). Ahí van
    los PDF. Sin Blob la app sigue funcionando, pero avisa en la carga y
    deja sólo los links de pago.
+
+   Según cuándo se conectó el store, Vercel usa uno de dos mecanismos: el
+   viejo pone un token fijo en `BLOB_READ_WRITE_TOKEN`; el nuevo pone
+   `BLOB_STORE_ID` y autentica por OIDC sin token fijo. El código soporta
+   los dos (`blobConfigurado()` en `api/_lib.js`), así que no importa cuál
+   te toque — no hay que crear `BLOB_READ_WRITE_TOKEN` a mano si Vercel ya
+   puso `BLOB_STORE_ID`.
 3. **`APP_PASSWORD`** en Settings → Environment Variables. Es la
    contraseña de acceso. Si no se define queda la que estaba hardcodeada
    (`Apross2026`), así que conviene configurarla y redeployar.

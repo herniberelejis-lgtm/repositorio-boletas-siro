@@ -62,6 +62,21 @@ function countPdf(rows) {
   return rows.filter((r) => !!r.blobUrl).length;
 }
 
+/**
+ * Si hay un Blob store conectado al proyecto.
+ *
+ * Vercel conecta Blob de dos formas según cuándo se creó el store:
+ *   - la vieja, con un token fijo en BLOB_READ_WRITE_TOKEN;
+ *   - la nueva, con BLOB_STORE_ID y autenticación por OIDC (el propio
+ *     @vercel/blob la resuelve solo con VERCEL_OIDC_TOKEN, que Vercel
+ *     inyecta cuando el proyecto tiene habilitado el acceso a las
+ *     variables de entorno del sistema).
+ * Alcanza con que exista cualquiera de las dos para que put()/del() function.
+ */
+function blobConfigurado() {
+  return !!(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
+}
+
 module.exports = {
   kv,
   INDEX_KEY,
@@ -75,5 +90,6 @@ module.exports = {
   publicRow,
   publicEntry,
   countFailed,
-  countPdf
+  countPdf,
+  blobConfigurado
 };

@@ -7,7 +7,7 @@
  * confirmar el setup sin tener que cargar un lote y ver si falla. No
  * devuelve ningún secreto: sólo si cada cosa está o no configurada.
  */
-const { requireAuth, kv, INDEX_KEY } = require('./_lib');
+const { requireAuth, kv, INDEX_KEY, blobConfigurado } = require('./_lib');
 
 module.exports = async (req, res) => {
   if (!requireAuth(req, res)) return;
@@ -34,10 +34,23 @@ module.exports = async (req, res) => {
     estado.kv.detalle = 'no se pudo leer: ' + err.message;
   }
 
-  // Blob: alcanza con el token, el put real se prueba al cargar un PDF
-  if (process.env.BLOB_READ_WRITE_TOKEN) {
-    estado.blob.ok = true;
-    estado.blob.detalle = 'conectado, los PDF se pueden guardar';
+  // Blob: la variable puede estar (BLOB_READ_WRITE_TOKEN o, en las
+  // conexiones nuevas de Vercel, BLOB_STORE_ID con OIDC) sin que el store
+  // funcione de verdad, así que se prueba con una escritura real y chica
+  // que se borra al toque — igual criterio que con KV.
+  if (blobConfigurado()) {
+    try {
+      const { put, del } = require('@vercel/blob');
+      const { url } = await put(
+        'siro/_healthcheck/' + Date.now() + '.txt', 'ok',
+        { access: 'public', contentType: 'text/plain', addRandomSuffix: true }
+      );
+      await del(url);
+      estado.blob.ok = true;
+      estado.blob.detalle = 'conectado, los PDF se pueden guardar';
+    } catch (err) {
+      estado.blob.detalle = 'las variables están, pero falló una escritura de prueba: ' + err.message;
+    }
   } else {
     estado.blob.detalle = 'sin conectar: los lotes quedan sólo con el link de pago';
   }
