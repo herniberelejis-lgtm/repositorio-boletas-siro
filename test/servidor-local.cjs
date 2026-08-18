@@ -4,7 +4,7 @@
  *   npm run dev:fake   ->  http://127.0.0.1:3000
  *
  * Sirve los archivos estáticos y enruta /api/* a los handlers reales de
- * api/, con @vercel/kv y @vercel/blob reemplazados por equivalentes en
+ * api/, con ioredis y @vercel/blob reemplazados por equivalentes en
  * memoria. La idea es que se pruebe el código que después corre en
  * producción, no una copia.
  *
@@ -17,16 +17,25 @@ const Module = require('module');
 
 const RAIZ = path.join(__dirname, '..');
 
-// ---- KV en memoria ---------------------------------------------------
+// api/_lib.js exige que REDIS_URL exista antes de construir el cliente,
+// aunque acá el cliente esté falseado y el valor no se use de verdad.
+process.env.REDIS_URL = process.env.REDIS_URL || 'redis://fake-local';
+
+// ---- Redis en memoria --------------------------------------------------
+// Guarda strings crudos, como el Redis real: la (de)serialización a JSON
+// la hace api/_lib.js, no este mock.
 const store = new Map();
-const clonar = (v) => (v === undefined ? null : JSON.parse(JSON.stringify(v)));
-const fakeKv = {
-  kv: {
-    async get(k) { return store.has(k) ? clonar(store.get(k)) : null; },
-    async set(k, v) { store.set(k, clonar(v)); return 'OK'; },
-    async del(...ks) { ks.flat().forEach((k) => store.delete(k)); return ks.length; }
+class FakeRedis {
+  constructor() {}
+  on() {}
+  async get(k) { return store.has(k) ? store.get(k) : null; }
+  async set(k, v) { store.set(k, String(v)); return 'OK'; }
+  async del(...ks) {
+    let n = 0;
+    ks.flat().forEach((k) => { if (store.delete(k)) n++; });
+    return n;
   }
-};
+}
 
 // ---- Blob en memoria -------------------------------------------------
 // Los blobs se sirven por HTTP para que el fetch() de api/boleta.js ande
@@ -56,7 +65,7 @@ const fakeBlob = {
 // Se interceptan los require antes de cargar los handlers.
 const loadOriginal = Module._load;
 Module._load = function (request, ...rest) {
-  if (request === '@vercel/kv') return fakeKv;
+  if (request === 'ioredis') return FakeRedis;
   if (request === '@vercel/blob') return fakeBlob;
   return loadOriginal.call(this, request, ...rest);
 };

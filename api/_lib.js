@@ -2,7 +2,46 @@
  * Helpers compartidos por los endpoints. El nombre arranca con "_" para que
  * Vercel no lo publique como ruta.
  */
-const { kv } = require('@vercel/kv');
+
+// -------------------------------------------------------------------------
+// KV
+// -------------------------------------------------------------------------
+// El producto nativo "Vercel KV" (REST + KV_REST_API_URL/TOKEN, que era lo
+// que pedía @vercel/kv) ya no es lo que ofrece Vercel al conectar una base
+// desde Storage: ahora es un Marketplace de integraciones, y la que se
+// conectó en este proyecto da una única REDIS_URL — una conexión Redis
+// común, por TCP, no la API REST de Upstash. Por eso se habla con ioredis
+// en lugar de @vercel/kv, con una envoltura mínima (get/set/del) que
+// serializa a JSON para no tener que tocar el resto del código: todo lo
+// demás sigue llamando a kv.get/kv.set/kv.del exactamente igual.
+const Redis = require('ioredis');
+
+let _redis = null;
+function redisClient() {
+  if (!_redis) {
+    const url = process.env.REDIS_URL || process.env.KV_URL;
+    if (!url) throw new Error('Falta REDIS_URL en las variables de entorno');
+    _redis = new Redis(url, { maxRetriesPerRequest: 3 });
+    _redis.on('error', (err) => console.error('Redis:', err.message));
+  }
+  return _redis;
+}
+
+const kv = {
+  async get(key) {
+    const raw = await redisClient().get(key);
+    if (raw == null) return null;
+    try { return JSON.parse(raw); } catch { return raw; }
+  },
+  async set(key, value) {
+    return redisClient().set(key, JSON.stringify(value));
+  },
+  async del(...keys) {
+    const flat = keys.flat().filter(Boolean);
+    if (!flat.length) return 0;
+    return redisClient().del(...flat);
+  }
+};
 
 const INDEX_KEY = 'siro-lotes-index';
 

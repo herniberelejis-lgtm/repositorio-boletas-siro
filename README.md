@@ -58,8 +58,16 @@ se puede saber cuál es cuál.
 
 ## Puesta en marcha en Vercel
 
-1. **Vercel KV** (Storage → Create Database → KV → Connect to Project).
-   Ahí se guardan los lotes y las filas.
+1. **Una base Redis** (Storage → Create Database → buscar "Redis" en el
+   marketplace → Connect to Project). Ahí se guardan los lotes y las
+   filas. El nombre exacto varía según el proveedor que ofrezca Vercel en
+   ese momento — no es el viejo "Vercel KV". Lo único que importa es que
+   quede conectada, porque el código lee de `REDIS_URL` (o `KV_URL` si el
+   proveedor usa ese nombre) con `ioredis`, sea cual sea el proveedor.
+
+   Si el plan que ofrece por defecto es pago, revisar las opciones de alta
+   disponibilidad/réplicas del formulario de alta: suelen tener un plan
+   gratis si se desactivan.
 2. **Vercel Blob** (Storage → Create → Blob → Connect to Project). Ahí van
    los PDF. Sin Blob la app sigue funcionando, pero avisa en la carga y
    deja sólo los links de pago.
