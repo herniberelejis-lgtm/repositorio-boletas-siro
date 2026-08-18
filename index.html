@@ -345,6 +345,7 @@
       <div id="repoTableWrap"></div>
       <div class="stats-strip" id="repoStats"></div>
       <div class="footer-actions">
+        <button class="danger hidden" id="clearFallidosBtn">Quitar lotes con PDF incompleto</button>
         <button class="danger" id="clearRepoBtn">Vaciar repositorio</button>
       </div>
     </div>
@@ -386,6 +387,7 @@ const uploadLog       = document.getElementById('uploadLog');
 const statusBadge     = document.getElementById('statusBadge');
 const repoTableWrap   = document.getElementById('repoTableWrap');
 const repoStats       = document.getElementById('repoStats');
+const clearFallidosBtn = document.getElementById('clearFallidosBtn');
 const queryBox        = document.getElementById('queryBox');
 const resultsPanel    = document.getElementById('resultsPanel');
 const resultsContainer= document.getElementById('resultsContainer');
@@ -685,6 +687,13 @@ async function renderRepo(){
     return;
   }
 
+  // Un lote de PDF quedó "incompleto" si le falta guardar el PDF de
+  // alguna boleta — puede ser todas (falló apenas empezó) o sólo algunas
+  // (por ejemplo si el deploy cambió de versión a mitad de la carga, como
+  // pasó con el redeploy del fix de Blob privado: los chunks de antes del
+  // redeploy quedaban sin PDF, los de después sí lo guardaban).
+  const esIncompleto = e => e.fileType === 'pdf' && (e.pdfCount || 0) < e.rowCount;
+
   const sorted = [...index].sort((a,b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
   repoTableWrap.innerHTML = `
     <div class="table-scroll">
@@ -699,7 +708,11 @@ async function renderRepo(){
             <td>${escapeHtml(e.convenio || '—')}</td>
             <td>${escapeHtml(e.cuenta || '—')}</td>
             <td>${e.rowCount}</td>
-            <td>${e.fileType === 'pdf' ? (e.pdfCount || 0) : '—'}</td>
+            <td>${e.fileType === 'pdf'
+                  ? (esIncompleto(e)
+                      ? '<span style="color:var(--danger-ink)">' + (e.pdfCount||0) + '</span> <span class="flag">incompleto</span>'
+                      : (e.pdfCount || 0))
+                  : '—'}</td>
             <td>${e.failedCount ? '<span style="color:var(--danger-ink)">' + e.failedCount + '</span>' : '0'}</td>
             <td>${new Date(e.uploadedAt).toLocaleString('es-AR')}</td>
             <td><button class="del-btn" data-id="${escapeHtml(e.id)}">Quitar</button></td>
@@ -724,6 +737,25 @@ async function renderRepo(){
       renderRepo();
     });
   });
+
+  const incompletos = index.filter(esIncompleto);
+  if (incompletos.length){
+    clearFallidosBtn.textContent = 'Quitar ' + incompletos.length + ' lote' +
+      (incompletos.length===1?'':'s') + ' con PDF incompleto';
+    clearFallidosBtn.classList.remove('hidden');
+    clearFallidosBtn.onclick = async () => {
+      if (!confirm('¿Quitar ' + incompletos.length + ' lote' + (incompletos.length===1?'':'s') +
+        ' con el PDF a medio guardar? Después se pueden volver a cargar los mismos archivos, van a reemplazar lo que quede.')) return;
+      clearFallidosBtn.disabled = true;
+      try{
+        for (const e of incompletos) await apiDeleteLote(e.id);
+      }catch(err){ alert('No se pudo terminar de borrar: ' + err.message); }
+      clearFallidosBtn.disabled = false;
+      renderRepo();
+    };
+  } else {
+    clearFallidosBtn.classList.add('hidden');
+  }
 
   renderRevision(index.filter(e => e.failedCount > 0));
 }

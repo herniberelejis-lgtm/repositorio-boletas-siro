@@ -299,6 +299,109 @@ test('circuito del Excel de Links de Pago: cargar, buscar y quitar el lote',
     assert.deepStrictEqual(errores, [], 'la página no debe tirar errores de JS');
   });
 
+test('el repositorio deja quitar en bloque los lotes con PDF a medio guardar',
+  { skip: chromiumDisponible() ? false : 'falta Chromium', timeout: 120000 },
+  async (t) => {
+    const { chromium } = require('playwright');
+    const { PDFDocument: PDFDoc } = require('pdf-lib');
+    const { url, servidor } = await iniciar(0);
+    const navegador = await chromium.launch();
+    const page = await (await navegador.newContext()).newPage();
+
+    t.after(async () => {
+      await navegador.close();
+      await new Promise((r) => servidor.close(r));
+    });
+
+    const locales = {
+      'xlsx.full.min.js': require.resolve('xlsx/dist/xlsx.full.min.js'),
+      'pdf.min.js': require.resolve('pdfjs-dist/legacy/build/pdf.js'),
+      'pdf.worker.min.js': require.resolve('pdfjs-dist/legacy/build/pdf.worker.js'),
+      'pdf-lib.min.js': require.resolve('pdf-lib/dist/pdf-lib.min.js')
+    };
+    await page.route('https://cdnjs.cloudflare.com/**', (route) => {
+      const archivo = locales[path.basename(new URL(route.request().url()).pathname)];
+      if (!archivo) return route.abort();
+      route.fulfill({ status: 200, contentType: 'text/javascript; charset=utf-8', body: fs.readFileSync(archivo, 'utf8') });
+    });
+    await page.route('https://fonts.googleapis.com/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+
+    const errores = [];
+    page.on('pageerror', (e) => errores.push(e.message));
+
+    const AUTH = { 'x-app-password': 'Apross2026', 'Content-Type': 'application/json' };
+    const dummyPdfB64 = Buffer.from(await (await PDFDoc.create()).save()).toString('base64');
+
+    // Se siembra el estado directo por API, sin pasar por el drag-and-drop:
+    // lo que se está probando es el panel de administración, no la carga.
+    const fila = (page) => ({ cpe: '000000000' + page + '7009900110', afiliado: String(page), page });
+
+    const completo = await page.request.post(url + '/api/lotes', {
+      headers: AUTH,
+      data: JSON.stringify({
+        filename: 'lote-completo.pdf', fileType: 'pdf',
+        rows: [1, 2].map(fila)
+      })
+    });
+    const { id: idCompleto } = await completo.json();
+    await page.request.post(url + '/api/boletas-pdf', {
+      headers: AUTH,
+      data: JSON.stringify({ loteId: idCompleto, chunk: { b64: dummyPdfB64, pages: [1, 2] } })
+    });
+
+    const incompleto = await page.request.post(url + '/api/lotes', {
+      headers: AUTH,
+      data: JSON.stringify({
+        filename: 'lote-incompleto.pdf', fileType: 'pdf',
+        rows: [1, 2, 3, 4].map(fila)
+      })
+    });
+    const { id: idIncompleto } = await incompleto.json();
+    // sólo se guarda la mitad de las páginas — el resto quedó sin PDF,
+    // como pasa si el deploy cambia de versión a mitad de una carga real
+    await page.request.post(url + '/api/boletas-pdf', {
+      headers: AUTH,
+      data: JSON.stringify({ loteId: idIncompleto, chunk: { b64: dummyPdfB64, pages: [1, 2] } })
+    });
+
+    await page.goto(url);
+    await page.fill('#passwordInput', 'Apross2026');
+    await page.click('#loginBtn');
+    await page.waitForSelector('#mainApp:not(.hidden)');
+    await page.click('#adminToggle');
+    await page.waitForSelector('#repoTableWrap table');
+
+    const filaIncompleta = page.locator('#repoTableWrap tr', { hasText: 'lote-incompleto.pdf' });
+    await assert.doesNotReject(filaIncompleta.locator('.flag', { hasText: 'incompleto' }).waitFor());
+    // columnas: Archivo, Tipo, Periodo, Convenio, Cuenta, Boletas, Con PDF, ...
+    const celdaConPdf = (await filaIncompleta.locator('td').nth(6).textContent()).trim();
+    assert.strictEqual(celdaConPdf, '2 incompleto', 'debe mostrar 2 con PDF, no 4');
+
+    const filaCompleta = page.locator('#repoTableWrap tr', { hasText: 'lote-completo.pdf' });
+    assert.strictEqual(await filaCompleta.locator('.flag').count(), 0,
+      'el lote completo no debería llevar la marca de incompleto');
+
+    const btnFallidos = page.locator('#clearFallidosBtn');
+    await assert.doesNotReject(btnFallidos.waitFor({ state: 'visible' }));
+    assert.match(await btnFallidos.textContent(), /1 lote/);
+
+    page.once('dialog', (d) => d.accept());
+    await btnFallidos.click();
+    // se espera a que la fila salga del DOM (renderRepo() reconstruye la
+    // tabla entera), no a que el botón quede "visible": un elemento que ya
+    // estaba oculto nunca cumple esa espera y el test cuelga.
+    await filaIncompleta.waitFor({ state: 'detached' });
+    assert.ok(await btnFallidos.isHidden(),
+      'el botón de lotes con PDF incompleto debería ocultarse cuando ya no queda ninguno');
+
+    const tablaFinal = await page.locator('#repoTableWrap').textContent();
+    assert.doesNotMatch(tablaFinal, /lote-incompleto\.pdf/, 'el lote incompleto se tenía que borrar');
+    assert.match(tablaFinal, /lote-completo\.pdf/, 'el lote completo no se tenía que tocar');
+
+    assert.deepStrictEqual(errores, [], 'la página no debe tirar errores de JS');
+  });
+
 async function textoDelPdf(buf) {
   const pdfjs = require('pdfjs-dist/legacy/build/pdf.js');
   const doc = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
